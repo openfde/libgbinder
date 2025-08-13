@@ -1308,7 +1308,7 @@ gbinder_writer_alloc(
     GBinderWriter* self,
     gsize size,
     gpointer (*alloc)(gsize),
-    void (*dealloc)())
+    GDestroyNotify dealloc)
 {
     GBinderWriterData* data = gbinder_writer_data(self);
 
