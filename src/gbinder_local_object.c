@@ -1,6 +1,6 @@
 /*
+ * Copyright (C) 2018-2026 Slava Monich <slava@monich.com>
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2023 Slava Monich <slava@monich.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -357,7 +357,10 @@ void
 gbinder_local_object_default_release(
     GBinderLocalObject* self)
 {
-    GASSERT(self->strong_refs > 0);
+    /*
+     * Double-check the refs in case if gbinder_ipc_exit() cleared them
+     * while this callback was being delivered to the main thread.
+     */
     if (self->strong_refs > 0) {
         self->strong_refs--;
         GVERBOSE_("%p => %d", self, self->strong_refs);
@@ -442,6 +445,7 @@ gbinder_local_object_init_base(
 
     self->ipc = gbinder_ipc_ref(ipc);
     self->ifaces = (const char**)priv->ifaces;
+    self->stability = GBINDER_STABILITY_SYSTEM;
     priv->txproc = txproc;
     priv->user_data = user_data;
 }
@@ -609,6 +613,16 @@ gbinder_local_object_handle_release(
     GBinderLocalObject* self)
 {
     gbinder_local_object_handle_later(self, gbinder_local_object_release_proc);
+}
+
+void
+gbinder_local_object_set_stability(
+    GBinderLocalObject* self,
+    GBINDER_STABILITY_LEVEL stability) /* Since 1.1.40 */
+{
+    if (G_LIKELY(self)) {
+        self->stability = stability;
+    }
 }
 
 /*==========================================================================*

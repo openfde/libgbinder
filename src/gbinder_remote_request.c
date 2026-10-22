@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2018-2021 Jolla Ltd.
- * Copyright (C) 2018-2021 Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2018-2024 Slava Monich <slava@monich.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -99,18 +99,22 @@ gbinder_remote_request_convert_to_local(
 {
     GBinderRemoteRequestPriv* self = gbinder_remote_request_cast(req);
 
-    if (G_LIKELY(self)) {
+    if (G_LIKELY(self) && G_LIKELY(convert)) {
         GBinderReaderData* data = &self->data;
+        GBinderBuffer* buffer = data->buffer;
 
-        if (!convert || convert->protocol == self->protocol) {
+        if (!buffer) {
+            return gbinder_local_request_new(convert->io, convert->protocol,
+                NULL);
+        } else if (convert->protocol == self->protocol) {
             /* The same protocol, the same format of RPC header */
-            return gbinder_local_request_new_from_data(data->buffer, convert);
+            return gbinder_local_request_new_from_data(buffer, convert);
         } else {
             /* Need to translate to another format */
             GBinderLocalRequest* local = gbinder_local_request_new_iface
                 (convert->io, convert->protocol, self->iface);
 
-            gbinder_local_request_append_contents(local, data->buffer,
+            gbinder_local_request_append_contents(local, buffer,
                 self->header_size, convert);
             return local;
         }
@@ -162,29 +166,25 @@ gbinder_remote_request_set_data(
     guint32 txcode,
     GBinderBuffer* buffer)
 {
+    /* The caller never passes NULL req */
     GBinderRemoteRequestPriv* self = gbinder_remote_request_cast(req);
+    GBinderReaderData* data = &self->data;
+    GBinderReader reader;
 
-    if (G_LIKELY(self)) {
-        GBinderReaderData* data = &self->data;
-        GBinderReader reader;
+    g_free(self->iface2);
+    gbinder_buffer_free(data->buffer);
+    data->buffer = buffer;
+    data->objects = gbinder_buffer_objects(buffer);
 
-        g_free(self->iface2);
-        gbinder_buffer_free(data->buffer);
-        data->buffer = buffer;
-        data->objects = gbinder_buffer_objects(buffer);
-
-        /* Parse RPC header */
-        gbinder_remote_request_init_reader2(self, &reader);
-        self->iface = self->protocol->read_rpc_header(&reader, txcode,
-            &self->iface2);
-        if (self->iface) {
-            self->header_size = gbinder_reader_bytes_read(&reader);
-        } else {
-            /* No RPC header */
-            self->header_size = 0;
-        }
+    /* Parse RPC header */
+    gbinder_remote_request_init_reader2(self, &reader);
+    self->iface = self->protocol->read_rpc_header(&reader, txcode,
+        &self->iface2);
+    if (self->iface) {
+        self->header_size = gbinder_reader_bytes_read(&reader);
     } else {
-        gbinder_buffer_free(buffer);
+        /* No RPC header */
+        self->header_size = 0;
     }
 }
 

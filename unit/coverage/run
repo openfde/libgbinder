@@ -27,7 +27,8 @@ unit_servicemanager \
 unit_servicemanager_aidl \
 unit_servicemanager_aidl2 \
 unit_servicemanager_aidl3 \
-unit_servicemanager_aidl4 \
+unit_servicemanager_aidl5 \
+unit_servicemanager_aidl6 \
 unit_servicemanager_hidl \
 unit_servicename \
 unit_servicepoll \
@@ -47,6 +48,11 @@ which dirname >> /dev/null || err "Please install dirname"
 if  [ ! -z "$(lcov --help | grep ' --rc ')" ] ; then
     LCOV_OPT="--rc lcov_branch_coverage=1"
     GENHTML_OPT="--branch-coverage"
+fi
+
+# If specific tests are provided on the command line, only run those
+if [ $# -gt 0 ] ; then
+    TESTS="$@"
 fi
 
 pushd `dirname $0` > /dev/null

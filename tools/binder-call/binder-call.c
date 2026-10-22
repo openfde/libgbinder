@@ -1,4 +1,5 @@
 /*
+ * Copyright (C) 2026 Jolla Mobile Ltd
  * Copyright (C) 2021-2022 Jolla Ltd.
  * Copyright (C) 2021 Franz-Josef Haider <franz.haider@jolla.com>
  *
@@ -759,9 +760,9 @@ app_init(
     "\thstr for an 8-bit hidl string\n"
     "\tf|float for a 32-bit float\n"
     "\td|double for a 64-bit double\n"
-    "\t[ TYPE ] for a vector<TYPE> where TYPE can be any of the possible types decribed here\n"
+    "\t[ TYPE ] for a vector<TYPE> where TYPE can be any of the possible types described here\n"
     "\t{ TYPE1 TYPE2 ... TYPEN } for a struct containing TYPE1, TYPE2, etc. where\n"
-    "\t all of the types can be any of the possible types decribed here.\n\n"
+    "\t all of the types can be any of the possible types described here.\n\n"
     "The following example calls getSensorsList method on \"android.hardware.sensors@1.0::ISensors/default\"\n"
     "service:\n\n"
     "\tbinder-call -d /dev/hwbinder android.hardware.sensors@1.0::ISensors/default 1 reply i32 \"[ { i32 i32 hstr hstr i32 i32 hstr f f f i32 i32 i32 hstr i32 i32 } ]\"\n");
@@ -770,9 +771,7 @@ app_init(
 
     memset(opt, 0, sizeof(*opt));
 
-    gutil_log_timestamp = FALSE;
     gutil_log_set_type(GLOG_TYPE_STDERR, pname);
-    gutil_log_default.level = GLOG_LEVEL_DEFAULT;
 
     if (g_option_context_parse(options, &argc, &argv, &error)) {
         int i;

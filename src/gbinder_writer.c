@@ -1,8 +1,7 @@
 /*
- * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2023 Slava Monich <slava@monich.com>
- *
- * You may use this file under the terms of BSD license as follows:
+ * Copyright (C) 2025-2026 Jolla Mobile Ltd
+ * Copyright (C) 2018-2026 Slava Monich <slava@monich.com>
+ * Copyright (C) 2018-2024 Jolla Ltd.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -35,6 +34,7 @@
 #include "gbinder_fmq_p.h"
 #include "gbinder_local_object.h"
 #include "gbinder_object_converter.h"
+#include "gbinder_rpc_protocol.h"
 #include "gbinder_io.h"
 #include "gbinder_log.h"
 
@@ -50,6 +50,7 @@
 
 typedef struct gbinder_writer_priv {
     GBinderWriterData* data;
+    guint offset;
 } GBinderWriterPriv;
 
 const GBinderWriterType gbinder_writer_type_byte = { "byte", 1, NULL };
@@ -115,11 +116,20 @@ gbinder_writer_data_append_contents(
             }
             while (*objects) {
                 const guint8* obj = *objects++;
-                gsize objsize, offset = obj - bufdata;
+                gsize objsize, src_objsize, offset = obj - bufdata;
                 GBinderLocalObject* local;
                 guint32 handle;
 
                 GASSERT(offset >= off && offset < bufsize);
+                if (offset >= bufsize) {
+                    GWARN("Invalid object offset %u", (guint)offset);
+                    return;
+                }
+                src_objsize = io->object_size(obj, proto);
+                if (src_objsize > bufsize - offset) {
+                    GWARN("Invalid object at offset %u", (guint)offset);
+                    return;
+                }
                 if (offset > off) {
                     /* Copy serialized data preceeding this object */
                     g_byte_array_append(dest, bufdata + off, offset - off);
@@ -129,9 +139,10 @@ gbinder_writer_data_append_contents(
                 gutil_int_array_append(data->offsets, dest->len);
 
                 /* Convert remote object into local if necessary */
-                if (convert && io->decode_binder_handle(obj, &handle, proto) &&
-                    (local = gbinder_object_converter_handle_to_local
-                    (convert, handle))) {
+                if (src_objsize && convert && io->decode_binder_handle(obj,
+                    &handle, proto) && (local =
+                    gbinder_object_converter_handle_to_local(convert,
+                    handle))) {
                     const guint pos = dest->len;
 
                     g_byte_array_set_size(dest, pos +
@@ -144,13 +155,17 @@ gbinder_writer_data_append_contents(
                     data->cleanup = gbinder_cleanup_add(data->cleanup,
                         (GDestroyNotify) gbinder_local_object_unref, local);
                 } else {
-                    objsize = io->object_size(obj, proto);
-                    g_byte_array_append(dest, obj, objsize);
+                    objsize = src_objsize;
+                    if (src_objsize) {
+                        g_byte_array_append(dest, obj, src_objsize);
+                    }
                 }
 
                 /* Size of each buffer has to be 8-byte aligned */
-                data->buffers_size += G_ALIGN8(io->object_data_size(obj));
-                off += objsize;
+                if (src_objsize) {
+                    data->buffers_size += G_ALIGN8(io->object_data_size(obj));
+                }
+                off += src_objsize;
             }
         }
         if (off < bufsize) {
@@ -175,10 +190,14 @@ gbinder_writer_data_record_offset(
 void
 gbinder_writer_init(
     GBinderWriter* self,
-    GBinderWriterData* data)
+    GBinderWriterData* data,
+    guint offset)
 {
+    GBinderWriterPriv* priv = gbinder_writer_cast(self);
+
     memset(self, 0, sizeof(*self));
-    gbinder_writer_cast(self)->data = data;
+    priv->data = data;
+    priv->offset = offset;
 }
 
 const void*
@@ -300,6 +319,23 @@ gbinder_writer_data_append_int32(
     *ptr = value;
 }
 
+static
+void
+gbinder_writer_data_overwrite_int32(
+    GBinderWriterData* data,
+    gsize offset,
+    gint32 value)
+{
+    GByteArray* buf = data->bytes;
+
+    if (buf->len >= offset + sizeof(gint32)) {
+        *((gint32*)(buf->data + offset)) = value;
+    } else {
+        GWARN("Can't overwrite at %lu as buffer is only %u bytes long",
+            (gulong)offset, buf->len);
+    }
+}
+
 void
 gbinder_writer_overwrite_int32(
     GBinderWriter* self,
@@ -309,14 +345,7 @@ gbinder_writer_overwrite_int32(
     GBinderWriterData* data = gbinder_writer_data(self);
 
     if (G_LIKELY(data)) {
-        GByteArray* buf = data->bytes;
-
-        if (buf->len >= offset + sizeof(gint32)) {
-            *((gint32*)(buf->data + offset)) = value;
-        } else {
-            GWARN("Can't overwrite at %lu as buffer is only %u bytes long",
-                (gulong)offset, buf->len);
-        }
+        gbinder_writer_data_overwrite_int32(data, offset, value);
     }
 }
 
@@ -523,37 +552,37 @@ gbinder_writer_data_append_string16_len(
         gsize padded_len = G_ALIGN4((len+1)*2);
         guint32* len_ptr;
         gunichar2* utf16_ptr;
+        gunichar2* utf16 = NULL;
+
+        /* Create utf-16 string to make sure of its size */
+        if (len > 0) {
+            glong utf16_len = 0;
+
+            utf16 = g_utf8_to_utf16(utf8, num_bytes, NULL, &utf16_len, NULL);
+            if (utf16) {
+                len = utf16_len;
+                padded_len = G_ALIGN4((len+1)*2);
+            }
+        }
 
         /* Preallocate space */
         g_byte_array_set_size(buf, old_size + padded_len + 4);
         len_ptr = (guint32*)(buf->data + old_size);
         utf16_ptr = (gunichar2*)(len_ptr + 1);
 
-        /* TODO: this could be optimized for ASCII strings, i.e. if
-         * len equals num_bytes */
-        if (len > 0) {
-            glong utf16_len = 0;
-            gunichar2* utf16 = g_utf8_to_utf16(utf8, num_bytes, NULL,
-                &utf16_len, NULL);
-
-            if (utf16) {
-                len = utf16_len;
-                padded_len = G_ALIGN4((len+1)*2);
-                memcpy(utf16_ptr, utf16, (len+1)*2);
-                g_free(utf16);
-            }
+        /* Copy string */
+        if (utf16) {
+            memcpy(utf16_ptr, utf16, len*2);
+            g_free(utf16);
         }
 
         /* Actual length */
         *len_ptr = len;
 
         /* Zero padding */
-        if (padded_len - (len + 1)*2) {
-            memset(utf16_ptr + (len + 1), 0, padded_len - (len + 1)*2);
+        if (padded_len > len*2) {
+            memset(utf16_ptr + len, 0, padded_len - len*2);
         }
-
-        /* Correct the packet size if necessaary */
-        g_byte_array_set_size(buf, old_size + padded_len + 4);
     } else if (utf8) {
         /* Empty string */
         gbinder_writer_data_append_string16_empty(data);
@@ -729,6 +758,19 @@ gbinder_writer_data_append_fds(
     } else {
         /* If the pointer is null only write zero size */
         gbinder_writer_data_append_int64(data, 0);
+    }
+}
+
+void
+gbinder_writer_append_fds(
+    GBinderWriter* self,
+    const GBinderFds *fds,
+    const GBinderParent* parent) /* Since 1.0.43 */
+{
+    GBinderWriterData* data = gbinder_writer_data(self);
+
+    if (G_LIKELY(data)) {
+        gbinder_writer_data_append_fds(data, fds, parent);
     }
 }
 
@@ -944,7 +986,7 @@ gbinder_writer_data_append_parcelable(
 {
     if (ptr) {
         /* Non-null */
-        gbinder_writer_data_append_int32(data, 1);
+        gbinder_writer_data_append_int32(data, kNonNullParcelableFlag);
 
         /*
          * Write the parcelable size, taking in account the size of this
@@ -956,8 +998,36 @@ gbinder_writer_data_append_parcelable(
         g_byte_array_append(data->bytes, ptr, size);
     } else {
         /* Null */
-        gbinder_writer_data_append_int32(data, 0);
+        gbinder_writer_data_append_int32(data, kNullParcelableFlag);
     }
+}
+
+void
+gbinder_writer_start_parcelable(
+    GBinderWriter* self,
+    GBinderWriter* parcelable) /* Since 1.1.47 */
+{
+    GBinderWriterData* data = gbinder_writer_data(self);
+
+    /* Non-null parcelable is assumed */
+    gbinder_writer_data_append_int32(data, kNonNullParcelableFlag);
+    gbinder_writer_init(parcelable, data, data->bytes->len);
+
+    /*
+     * Write the dummy parcelable size which is later fixed by
+     * gbinder_writer_finish_parcelable.
+     */
+    gbinder_writer_data_append_int32(data, 0);
+}
+
+void
+gbinder_writer_finish_parcelable(
+    GBinderWriter* parcelable) /* Since 1.1.47 */
+{
+    GBinderWriterPriv* priv = gbinder_writer_cast(parcelable);
+
+    gbinder_writer_data_overwrite_int32(priv->data, priv->offset,
+        priv->data->bytes->len - priv->offset);
 }
 
 void
@@ -1176,8 +1246,11 @@ gbinder_writer_data_append_local_object(
     n = data->io->encode_local_object(buf->data + offset, obj, data->protocol);
     /* Fix the data size */
     g_byte_array_set_size(buf, offset + n);
-    /* Record the offset */
-    gbinder_writer_data_record_offset(data, offset);
+
+    if (obj) {
+        /* Record the offset */
+        gbinder_writer_data_record_offset(data, offset);
+    }
 }
 
 void
@@ -1203,19 +1276,29 @@ gbinder_writer_append_byte_array(
     GASSERT(len >= 0);
     if (G_LIKELY(data)) {
         GByteArray* buf = data->bytes;
-        void* ptr;
+        gsize padded_len;
+        guint8* ptr;
 
         if (!byte_array) {
             len = 0;
         }
 
-        g_byte_array_set_size(buf, buf->len + sizeof(len) + len);
-        ptr = buf->data + (buf->len - sizeof(len) - len);
+        /*
+         * Android aligns byte array reads and writes to 4 bytes and
+         * pads with 0xFF.
+         */
+        padded_len = G_ALIGN4(len);
+        g_byte_array_set_size(buf, buf->len + sizeof(len) + padded_len);
+        ptr = buf->data + (buf->len - sizeof(len) - padded_len);
 
         if (len > 0) {
             *((gint32*)ptr) = len;
             ptr += sizeof(len);
             memcpy(ptr, byte_array, len);
+            /* FF padding */
+            if (padded_len > len) {
+                memset(ptr + len, 0xff, padded_len - len);
+            }
         } else {
             *((gint32*)ptr) = -1;
         }
@@ -1223,51 +1306,6 @@ gbinder_writer_append_byte_array(
 }
 
 #if GBINDER_FMQ_SUPPORTED
-
-static
-void
-gbinder_writer_data_append_fmq_descriptor(
-    GBinderWriterData* data,
-    const GBinderFmq* queue)
-{
-    GBinderParent parent;
-    GBinderMQDescriptor* desc = gbinder_fmq_get_descriptor(queue);
-    GBinderMQDescriptor* mqdesc = gutil_memdup(desc,
-        sizeof(GBinderMQDescriptor));
-
-    const gsize vec_total =
-        desc->grantors.count * sizeof(GBinderFmqGrantorDescriptor);
-    void* vec_buf = gutil_memdup(desc->grantors.data.ptr, vec_total);
-
-    const gsize fds_total = sizeof(GBinderFds) +
-        sizeof(int) * (desc->data.fds->num_fds + desc->data.fds->num_ints);
-    GBinderFds* fds = gutil_memdup(desc->data.fds, fds_total);
-
-    mqdesc->data.fds = fds;
-    data->cleanup = gbinder_cleanup_add(data->cleanup, g_free, fds);
-
-    /* Fill in the grantor vector descriptor */
-    if (vec_buf) {
-        mqdesc->grantors.count = desc->grantors.count;
-        mqdesc->grantors.data.ptr = vec_buf;
-        mqdesc->grantors.owns_buffer = TRUE;
-        data->cleanup = gbinder_cleanup_add(data->cleanup, g_free, vec_buf);
-    }
-    data->cleanup = gbinder_cleanup_add(data->cleanup, g_free, mqdesc);
-
-    /* Write the FMQ descriptor object */
-    parent.index = gbinder_writer_data_append_buffer_object(data,
-        mqdesc, sizeof(*mqdesc), NULL);
-
-    /* Write the vector data buffer */
-    parent.offset = GBINDER_MQ_DESCRIPTOR_GRANTORS_OFFSET;
-    gbinder_writer_data_append_buffer_object(data, vec_buf, vec_total,
-        &parent);
-
-    /* Write the fds */
-    parent.offset = GBINDER_MQ_DESCRIPTOR_FDS_OFFSET;
-    gbinder_writer_data_append_fds(data, mqdesc->data.fds, &parent);
-}
 
 void
 gbinder_writer_append_fmq_descriptor(
@@ -1277,7 +1315,7 @@ gbinder_writer_append_fmq_descriptor(
     GBinderWriterData* data = gbinder_writer_data(self);
 
     if (G_LIKELY(data) && G_LIKELY(queue)) {
-        gbinder_writer_data_append_fmq_descriptor(data, queue);
+        data->protocol->write_fmq_descriptor(self, queue);
     }
 }
 
@@ -1295,11 +1333,14 @@ gbinder_writer_data_append_remote_object(
     /* Preallocate enough space */
     g_byte_array_set_size(buf, offset + GBINDER_MAX_BINDER_OBJECT_SIZE);
     /* Write the object */
-    n = data->io->encode_remote_object(buf->data + offset, obj);
+    n = data->io->encode_remote_object(buf->data + offset, obj, data->protocol);
     /* Fix the data size */
     g_byte_array_set_size(buf, offset + n);
-    /* Record the offset */
-    gbinder_writer_data_record_offset(data, offset);
+
+    if (obj) {
+        /* Record the offset */
+        gbinder_writer_data_record_offset(data, offset);
+    }
 }
 
 static
@@ -1308,7 +1349,7 @@ gbinder_writer_alloc(
     GBinderWriter* self,
     gsize size,
     gpointer (*alloc)(gsize),
-    void (*dealloc)())
+    void (*dealloc)(gpointer))
 {
     GBinderWriterData* data = gbinder_writer_data(self);
 

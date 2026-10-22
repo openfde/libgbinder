@@ -1,9 +1,9 @@
 /*
+ * Copyright (C) 2018-2026 Slava Monich <slava@monich.com>
+ * Copyright (C) 2025 Jolla Mobile Ltd.
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2022 Slava Monich <slava.monich@jolla.com>
- * Copyright (C) 2023 Slava Monich <slava@monich.com>
  *
- * You may use this file under the terms of BSD license as follows:
+ * You may use this file under the terms of the BSD license as follows:
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -46,6 +46,7 @@
 #include "gbinder_io.h"
 
 #include <gutil_intarray.h>
+#include <gutil_macros.h>
 #include <gutil_misc.h>
 #include <gutil_log.h>
 
@@ -57,11 +58,20 @@ static const char TMP_DIR_TEMPLATE[] = "gbinder-test-writer-XXXXXX";
 
 static
 GBinderLocalRequest*
+test_local_request_new_with_io_dev(
+    const GBinderIo* io,
+    const char *dev)
+{
+    return gbinder_local_request_new(io,
+      gbinder_rpc_protocol_for_device(dev), NULL);
+}
+
+static
+GBinderLocalRequest*
 test_local_request_new_with_io(
     const GBinderIo* io)
 {
-    return gbinder_local_request_new(io,
-      gbinder_rpc_protocol_for_device(GBINDER_DEFAULT_BINDER), NULL);
+    return test_local_request_new_with_io_dev(io, GBINDER_DEFAULT_BINDER);
 }
 
 static
@@ -78,15 +88,20 @@ test_local_request_new_64()
     return test_local_request_new_with_io(&gbinder_io_64);
 }
 
+static
+GBinderLocalRequest*
+test_local_request_new_64_hidl()
+{
+    return test_local_request_new_with_io_dev(&gbinder_io_64,
+        GBINDER_DEFAULT_HWBINDER);
+}
+
 /*==========================================================================*
  * Test context
  *==========================================================================*/
 
 typedef struct test_context {
-    const char* default_config_dir;
-    const char* default_config_file;
-    char* config_dir;
-    char* config_subdir;
+    TestConfig config;
     char* config_file;
 } TestContext;
 
@@ -97,20 +112,17 @@ test_context_init(
     const char* prot)
 {
     memset(test, 0, sizeof(*test));
-    test->default_config_dir = gbinder_config_dir;
-    test->default_config_file = gbinder_config_file;
-    test->config_dir = g_dir_make_tmp(TMP_DIR_TEMPLATE, NULL);
-    test->config_subdir = g_build_filename(test->config_dir, "d", NULL);
-    test->config_file = g_build_filename(test->config_dir, "test.conf", NULL);
-    gbinder_config_dir = test->config_subdir; /* Doesn't exist */
-    gbinder_config_file = test->config_file;
+    test_config_init(&test->config, TMP_DIR_TEMPLATE);
     if (prot) {
         char* config = g_strdup_printf("[Protocol]\n"
             GBINDER_DEFAULT_BINDER " = %s", prot);
 
+        test->config_file = g_build_filename(test->config.config_dir,
+            "test.conf", NULL);
         GDEBUG("Config file %s", test->config_file);
         g_assert(g_file_set_contents(test->config_file, config, -1, NULL));
         g_free(config);
+        gbinder_config_file = test->config_file;
     }
 }
 
@@ -119,15 +131,11 @@ void
 test_context_deinit(
     TestContext* test)
 {
-    remove(test->config_file);
-    remove(test->config_dir);
-    g_free(test->config_file);
-    g_free(test->config_subdir);
-    g_free(test->config_dir);
-    gbinder_config_dir = test->default_config_dir;
-    gbinder_config_file = test->default_config_file;
-    gbinder_config_exit();
-    gbinder_rpc_protocol_exit();
+    if (test->config_file) {
+        remove(test->config_file);
+        g_free(test->config_file);
+    }
+    test_config_cleanup(&test->config);
 }
 
 /*==========================================================================*
@@ -528,11 +536,23 @@ static const guint8 string16_tests_data_xy[] = {
     0x00, 0x00, 0x00, 0x00
 };
 
+static const guint8 string16_tests_data_surrogates[] = {
+    TEST_INT32_BYTES(8),
+    TEST_INT16_BYTES(0xd83d), TEST_INT16_BYTES(0xde00),
+    TEST_INT16_BYTES(0xd83d), TEST_INT16_BYTES(0xde01),
+    TEST_INT16_BYTES(0xd83d), TEST_INT16_BYTES(0xde02),
+    TEST_INT16_BYTES(0xd83d), TEST_INT16_BYTES(0xde03),
+    0x00, 0x00, 0x00, 0x00
+};
+
 static const TestString16Data test_string16_tests[] = {
     { "null", NULL, TEST_ARRAY_AND_SIZE(string16_tests_data_null) },
     { "empty", "", TEST_ARRAY_AND_SIZE(string16_tests_data_empty) },
     { "1", "x", TEST_ARRAY_AND_SIZE(string16_tests_data_x) },
-    { "2", "xy", TEST_ARRAY_AND_SIZE(string16_tests_data_xy) }
+    { "2", "xy", TEST_ARRAY_AND_SIZE(string16_tests_data_xy) },
+    { "surrogates", "\xF0\x9F\x98\x80" "\xF0\x9F\x98\x81"
+      "\xF0\x9F\x98\x82" "\xF0\x9F\x98\x83",
+      TEST_ARRAY_AND_SIZE(string16_tests_data_surrogates) }
 };
 
 static
@@ -550,7 +570,7 @@ test_string16(
     data = gbinder_local_request_data(req);
     g_assert(!gbinder_output_data_offsets(data));
     g_assert(!gbinder_output_data_buffers_size(data));
-    g_assert(data->bytes->len == test->output_len);
+    g_assert_cmpuint(data->bytes->len, == ,test->output_len);
     g_assert(!memcmp(data->bytes->data, test->output, test->output_len));
     gbinder_local_request_unref(req);
 }
@@ -948,14 +968,16 @@ test_parcelable(
     void)
 {
     const guint8 encoded_non_null[] = {
+        TEST_INT32_BYTES(42),
         TEST_INT32_BYTES(1),
         TEST_INT32_BYTES(sizeof(TestData) + sizeof(gint32)),
         TEST_INT32_BYTES(10)
     };
+    const gint32 prefix = 42;
     const gint32 test_null_value = 0;
     GBinderLocalRequest* req;
     GBinderOutputData* data;
-    GBinderWriter writer;
+    GBinderWriter writer, parcelable;
     TestData test_data;
 
     test_data.x = 10;
@@ -963,13 +985,27 @@ test_parcelable(
     /* Non-null */
     req = test_local_request_new();
     gbinder_local_request_init_writer(req, &writer);
+    gbinder_writer_append_int32(&writer, prefix);
     gbinder_writer_append_parcelable(&writer, &test_data, sizeof(test_data));
 
     data = gbinder_local_request_data(req);
     g_assert(!gbinder_output_data_buffers_size(data));
     g_assert(data->bytes->len == sizeof(encoded_non_null));
     g_assert(!memcmp(data->bytes->data, &encoded_non_null, data->bytes->len));
+    gbinder_local_request_unref(req);
 
+    /* Same with start/finish parcelable */
+    req = test_local_request_new();
+    gbinder_local_request_init_writer(req, &writer);
+    gbinder_writer_append_int32(&writer, prefix);
+    gbinder_writer_start_parcelable(&writer, &parcelable);
+    gbinder_writer_append_bytes(&parcelable, &test_data, sizeof(test_data));
+    gbinder_writer_finish_parcelable(&parcelable);
+
+    data = gbinder_local_request_data(req);
+    g_assert(!gbinder_output_data_buffers_size(data));
+    g_assert(data->bytes->len == sizeof(encoded_non_null));
+    g_assert(!memcmp(data->bytes->data, &encoded_non_null, data->bytes->len));
     gbinder_local_request_unref(req);
 
     /* Null */
@@ -1348,7 +1384,6 @@ test_local_object(
     const TestLocalObjectData* test = test_data;
     GBinderLocalRequest* req;
     GBinderOutputData* data;
-    GUtilIntArray* offsets;
     GBinderWriter writer;
     TestContext context;
 
@@ -1357,10 +1392,7 @@ test_local_object(
     gbinder_local_request_init_writer(req, &writer);
     gbinder_writer_append_local_object(&writer, NULL);
     data = gbinder_local_request_data(req);
-    offsets = gbinder_output_data_offsets(data);
-    g_assert(offsets);
-    g_assert_cmpuint(offsets->count, == ,1);
-    g_assert_cmpuint(offsets->data[0], == ,0);
+    g_assert(!gbinder_output_data_offsets(data));
     g_assert_cmpuint(gbinder_output_data_buffers_size(data), == ,0);
     g_assert_cmpuint(data->bytes->len, == ,test->objsize);
     gbinder_local_request_unref(req);
@@ -1378,7 +1410,6 @@ test_remote_object(
 {
     GBinderLocalRequest* req = test_local_request_new_64();
     GBinderOutputData* data;
-    GUtilIntArray* offsets;
     GBinderWriter writer;
     TestContext test;
 
@@ -1386,10 +1417,7 @@ test_remote_object(
     gbinder_local_request_init_writer(req, &writer);
     gbinder_writer_append_remote_object(&writer, NULL);
     data = gbinder_local_request_data(req);
-    offsets = gbinder_output_data_offsets(data);
-    g_assert(offsets);
-    g_assert(offsets->count == 1);
-    g_assert(offsets->data[0] == 0);
+    g_assert(!gbinder_output_data_offsets(data));
     g_assert(!gbinder_output_data_buffers_size(data));
     g_assert(data->bytes->len == BINDER_OBJECT_SIZE_64);
     gbinder_local_request_unref(req);
@@ -1409,7 +1437,7 @@ test_byte_array(
     GBinderOutputData* data;
     GBinderWriter writer;
 
-    const char in_data[] = "abcd1234";
+    const char in_data[] = "abcd12";
     gint32 in_len = sizeof(in_data) - 1;
     gint32 null_len = -1;
 
@@ -1442,7 +1470,7 @@ test_byte_array(
     data = gbinder_local_request_data(req);
     g_assert(!gbinder_output_data_offsets(data));
     g_assert(!gbinder_output_data_buffers_size(data));
-    g_assert(data->bytes->len == sizeof(in_len) + in_len);
+    g_assert(data->bytes->len == sizeof(in_len) + G_ALIGN4(in_len));
     g_assert(!memcmp(data->bytes->data, &in_len, sizeof(in_len)));
     g_assert(!memcmp(data->bytes->data + sizeof(in_len), in_data, in_len));
     gbinder_local_request_unref(req);
@@ -1472,7 +1500,7 @@ test_fmq_descriptor(
         GBINDER_FMQ_FLAG_CONFIGURE_EVENT_FLAG, -1, 0);
 
     g_assert(fmq);
-    req = test_local_request_new_64();
+    req = test_local_request_new_64_hidl();
     gbinder_local_request_init_writer(req, &writer);
     gbinder_writer_append_fmq_descriptor(&writer, fmq);
     data = gbinder_local_request_data(req);
@@ -1483,6 +1511,36 @@ test_fmq_descriptor(
     g_assert(offsets->data[1] == BUFFER_OBJECT_SIZE_64);
     g_assert(offsets->data[2] == 2 * BUFFER_OBJECT_SIZE_64 + sizeof(gint64));
     g_assert(offsets->data[3] == 3 * BUFFER_OBJECT_SIZE_64 + sizeof(gint64));
+    g_assert_cmpuint(data->bytes->len, == ,len);
+    gbinder_local_request_unref(req);
+    gbinder_fmq_unref(fmq);
+}
+
+static
+void
+test_fmq_descriptor_aidl(
+    void)
+{
+    GBinderLocalRequest* req;
+    GBinderOutputData* data;
+    GBinderWriter writer;
+    const gint32 len = 2 * sizeof(gint32) /* FMQ decriptor parcelable header */
+        + sizeof(gint32) + 4 * (4 * sizeof(gint32) + sizeof(gint64)) /* grantors + parcelable headers */
+        + 2 * sizeof(gint32) /* Native handle parcelable header */
+        + sizeof(gint32) + 2 * sizeof(gint32) + 3 * sizeof(gint64) /* fds (1 fd array) */
+        + sizeof(gint32) /* ints (0 int array) */
+        + sizeof(gint32) /* quantum */
+        + sizeof(gint32); /* flags */
+
+    GBinderFmq* fmq = gbinder_fmq_new(sizeof(guint32), 5,
+        GBINDER_FMQ_TYPE_SYNC_READ_WRITE,
+        GBINDER_FMQ_FLAG_CONFIGURE_EVENT_FLAG, -1, 0);
+
+    g_assert(fmq);
+    req = test_local_request_new_64();
+    gbinder_local_request_init_writer(req, &writer);
+    gbinder_writer_append_fmq_descriptor(&writer, fmq);
+    data = gbinder_local_request_data(req);
     g_assert_cmpuint(data->bytes->len, == ,len);
     gbinder_local_request_unref(req);
     gbinder_fmq_unref(fmq);
@@ -1616,6 +1674,8 @@ int main(int argc, char* argv[])
         } else {
             close(test_fd);
             g_test_add_func(TEST_("fmq_descriptor"), test_fmq_descriptor);
+            g_test_add_func(TEST_("fmq_descriptor_aidl"),
+                test_fmq_descriptor_aidl);
         }
     }
 #endif /* GBINDER_FMQ_SUPPORTED */

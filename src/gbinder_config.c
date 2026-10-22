@@ -1,6 +1,7 @@
 /*
  * Copyright (C) 2020 Jolla Ltd.
  * Copyright (C) 2020 Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2026 Jolla Mobile Ltd
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -135,21 +136,60 @@ static const GBinderConfigPresetGroup gbinder_config_30[] = {
 
 /* API level 31 */
 
-static const GBinderConfigPresetEntry gbinder_config_31_servicemanager[] = {
+static const GBinderConfigPresetEntry gbinder_config_31_protocol[] = {
     { "/dev/binder", "aidl4" },
     { "/dev/vndbinder", "aidl4" },
     { NULL, NULL }
 };
 
 static const GBinderConfigPresetGroup gbinder_config_31[] = {
+    { GBINDER_CONFIG_GROUP_PROTOCOL, gbinder_config_31_protocol },
+    { GBINDER_CONFIG_GROUP_SERVICEMANAGER, gbinder_config_30_servicemanager },
+    { NULL, NULL }
+};
+
+/* API level 33 - reverts back to AIDL3 protocol */
+
+static const GBinderConfigPresetGroup gbinder_config_33[] = {
     { GBINDER_CONFIG_GROUP_PROTOCOL, gbinder_config_30_protocol },
-    { GBINDER_CONFIG_GROUP_SERVICEMANAGER, gbinder_config_31_servicemanager },
+    { GBINDER_CONFIG_GROUP_SERVICEMANAGER, gbinder_config_30_servicemanager },
+    { NULL, NULL }
+};
+
+/* API level 35 */
+
+static const GBinderConfigPresetEntry gbinder_config_35_servicemanager[] = {
+    { "/dev/binder", "aidl5" },
+    { "/dev/vndbinder", "aidl5" },
+    { NULL, NULL }
+};
+
+static const GBinderConfigPresetGroup gbinder_config_35[] = {
+    { GBINDER_CONFIG_GROUP_PROTOCOL, gbinder_config_30_protocol },
+    { GBINDER_CONFIG_GROUP_SERVICEMANAGER, gbinder_config_35_servicemanager },
+    { NULL, NULL }
+};
+
+/* API level 36 */
+
+static const GBinderConfigPresetEntry gbinder_config_36_servicemanager[] = {
+    { "/dev/binder", "aidl6" },
+    { "/dev/vndbinder", "aidl6" },
+    { NULL, NULL }
+};
+
+static const GBinderConfigPresetGroup gbinder_config_36[] = {
+    { GBINDER_CONFIG_GROUP_PROTOCOL, gbinder_config_30_protocol },
+    { GBINDER_CONFIG_GROUP_SERVICEMANAGER, gbinder_config_36_servicemanager },
     { NULL, NULL }
 };
 
 /* Presets sorted by API level in descending order */
 
 static const GBinderConfigPreset gbinder_config_presets[] = {
+    { 36, gbinder_config_36 },
+    { 35, gbinder_config_35 },
+    { 33, gbinder_config_33 },
     { 31, gbinder_config_31 },
     { 30, gbinder_config_30 },
     { 29, gbinder_config_29 },

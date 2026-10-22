@@ -1,8 +1,7 @@
 /*
+ * Copyright (C) 2026 Jolla Mobile Ltd
+ * Copyright (C) 2018-2024 Slava Monich <slava@monich.com>
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2022 Slava Monich <slava.monich@jolla.com>
- *
- * You may use this file under the terms of BSD license as follows:
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -148,6 +147,26 @@ gbinder_reader_read_parcelable(
     gsize* size); /* Since 1.1.19 */
 
 const void*
+gbinder_reader_read_parcelable2(
+    GBinderReader* reader,
+    gsize* size,
+    gboolean* ok); /* Since 1.1.48 */
+
+gboolean
+gbinder_reader_start_parcelable(
+    GBinderReader* reader,
+    GBinderReader* parcelable,
+    gboolean* non_null); /* Since 1.1.48 */
+
+void
+gbinder_reader_finish_parcelable(
+    GBinderReader* parcelable); /* Since 1.1.48 */
+
+gboolean
+gbinder_reader_skip_parcelable(
+    GBinderReader* reader); /* Since 1.1.49 */
+
+const void*
 gbinder_reader_read_hidl_struct1(
     GBinderReader* reader,
     gsize size); /* Since 1.0.9 */
@@ -195,6 +214,15 @@ gbinder_reader_skip_buffer(
 const char*
 gbinder_reader_read_string8(
     GBinderReader* reader);
+
+gboolean
+gbinder_reader_read_nullable_string8(
+    GBinderReader* reader,
+    const char** out,
+    gsize* out_len); /* Since 1.1.41 */
+
+#define gbinder_reader_skip_nullable_string8(reader) \
+    gbinder_reader_read_nullable_string8(reader, NULL, NULL)
 
 char*
 gbinder_reader_read_string16(

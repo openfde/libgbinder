@@ -1,8 +1,7 @@
 /*
  * Copyright (C) 2020-2022 Jolla Ltd.
  * Copyright (C) 2023 Slava Monich <slava@monich.com>
- *
- * You may use this file under the terms of BSD license as follows:
+ * Copyright (C) 2026 Jolla Mobile Ltd
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -37,7 +36,6 @@
 #include "gbinder_ipc.h"
 #include "gbinder_reader.h"
 #include "gbinder_servicemanager_p.h"
-#include "gbinder_rpc_protocol.h"
 #include "gbinder_local_object_p.h"
 #include "gbinder_local_reply.h"
 #include "gbinder_remote_request.h"
@@ -60,17 +58,17 @@ gbinder_servicemanager_hidl_get_type()
 }
 
 GType
-gbinder_servicemanager_aidl2_get_type()
+gbinder_servicemanager_aidl5_get_type()
 {
-    /* Dummy function to avoid pulling in gbinder_servicemanager_aidl2 */
+    /* Dummy function to avoid pulling in gbinder_servicemanager_aidl5 */
     g_assert_not_reached();
     return 0;
 }
 
 GType
-gbinder_servicemanager_aidl4_get_type()
+gbinder_servicemanager_aidl6_get_type()
 {
-    /* Dummy function to avoid pulling in gbinder_servicemanager_aidl4 */
+    /* Dummy function to avoid pulling in gbinder_servicemanager_aidl6 */
     g_assert_not_reached();
     return 0;
 }
@@ -280,10 +278,7 @@ servicemanager_aidl3_new(
  *==========================================================================*/
 
 typedef struct test_context {
-    const char* default_config_dir;
-    const char* default_config_file;
-    char* config_dir;
-    char* config_subdir;
+    TestConfig config;
     char* config_file;
     GBinderLocalObject* object;
     ServiceManagerAidl3* service;
@@ -308,14 +303,11 @@ test_context_init(
     GBinderIpc* ipc;
 
     memset(test, 0, sizeof(*test));
-    test->default_config_dir = gbinder_config_dir;
-    test->default_config_file = gbinder_config_file;
-    test->config_dir = g_dir_make_tmp(TMP_DIR_TEMPLATE, NULL);
-    test->config_subdir = g_build_filename(test->config_dir, "d", NULL);
-    test->config_file = g_build_filename(test->config_dir, "test.conf", NULL);
+    test_config_init(&test->config, TMP_DIR_TEMPLATE);
+    test->config_file = g_build_filename(test->config.config_dir,
+        "test.conf", NULL);
     g_assert(g_file_set_contents(test->config_file, config, -1, NULL));
     GDEBUG("Config file %s", test->config_file);
-    gbinder_config_dir = test->config_subdir; /* Doesn't exist */
     gbinder_config_file = test->config_file;
 
     ipc = gbinder_ipc_new(dev, NULL);
@@ -339,14 +331,9 @@ test_context_deinit(
     gbinder_servicemanager_unref(test->client);
     test_binder_exit_wait(&test_opt, test->loop);
     remove(test->config_file);
-    remove(test->config_dir);
     g_free(test->config_file);
-    g_free(test->config_subdir);
-    g_free(test->config_dir);
     g_main_loop_unref(test->loop);
-    gbinder_config_dir = test->default_config_dir;
-    gbinder_config_file = test->default_config_file;
-    gbinder_config_exit();
+    test_config_cleanup(&test->config);
 }
 
 static

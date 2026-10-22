@@ -1,6 +1,6 @@
 /*
+ * Copyright (C) 2018-2026 Slava Monich <slava@monich.com>
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2023 Slava Monich <slava@monich.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -905,28 +905,25 @@ gbinder_ipc_looper_check(
 {
     if (G_LIKELY(self)) {
         GBinderIpcPriv* priv = self->priv;
+        GBinderIpcLooper* new_looper = NULL;
 
+        /* Lock */
+        g_mutex_lock(&priv->looper_mutex);
         if (!priv->primary_loopers) {
-            GBinderIpcLooper* looper;
+            priv->primary_loopers = gbinder_ipc_looper_new(self);
+            new_looper = priv->primary_loopers;
+            if (new_looper) {
+                gbinder_ipc_looper_ref(new_looper);
+            }
+        }
+        g_mutex_unlock(&priv->looper_mutex);
+        /* Unlock */
 
-            /* Lock */
-            g_mutex_lock(&priv->looper_mutex);
-            if (!priv->primary_loopers) {
-                priv->primary_loopers = gbinder_ipc_looper_new(self);
-            }
-            looper = priv->primary_loopers;
-            if (looper) {
-                gbinder_ipc_looper_ref(looper);
-            }
-            g_mutex_unlock(&priv->looper_mutex);
-            /* Unlock */
-
-            /* We are not ready to accept incoming transactions until
-             * looper has started. We may need to wait a bit. */
-            if (looper) {
-                gbinder_ipc_looper_start(looper);
-                gbinder_ipc_looper_unref(looper);
-            }
+        /* We are not ready to accept incoming transactions until
+         * looper has started. We may need to wait a bit. */
+        if (new_looper) {
+            gbinder_ipc_looper_start(new_looper);
+            gbinder_ipc_looper_unref(new_looper);
         }
     }
 }
@@ -1795,9 +1792,8 @@ const GBinderIpcSyncApi gbinder_ipc_sync_worker = {
  * GBinderIpcSyncApi for the main thread
  *==========================================================================*/
 
-static
 GBinderRemoteReply*
-gbinder_ipc_transact_sync_reply(
+gbinder_ipc_transact_sync_reply_main(
     GBinderIpc* self,
     guint32 handle,
     guint32 code,
@@ -1823,9 +1819,8 @@ gbinder_ipc_transact_sync_reply(
     return NULL;
 }
 
-static
 int
-gbinder_ipc_transact_sync_oneway(
+gbinder_ipc_transact_sync_oneway_main(
     GBinderIpc* self,
     guint32 handle,
     guint32 code,
@@ -1842,8 +1837,8 @@ gbinder_ipc_transact_sync_oneway(
 }
 
 const GBinderIpcSyncApi gbinder_ipc_sync_main = {
-    .sync_reply = gbinder_ipc_transact_sync_reply,
-    .sync_oneway = gbinder_ipc_transact_sync_oneway
+    .sync_reply = gbinder_ipc_transact_sync_reply_main,
+    .sync_oneway = gbinder_ipc_transact_sync_oneway_main
 };
 
 /*==========================================================================*
@@ -2246,6 +2241,7 @@ gbinder_ipc_exit()
         for (l = local_objs; l; l = l->next) {
             GBinderLocalObject* obj = GBINDER_LOCAL_OBJECT(l->data);
 
+            GVERBOSE_("%p has %d strong ref(s)", obj, obj->strong_refs);
             while (obj->strong_refs > 0) {
                 obj->strong_refs--;
                 gbinder_local_object_unref(obj);

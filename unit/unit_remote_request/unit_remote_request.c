@@ -1,6 +1,6 @@
 /*
+ * Copyright (C) 2018-2024 Slava Monich <slava@monich.com>
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2022 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -47,6 +47,7 @@
 #include <gutil_intarray.h>
 
 static TestOpt test_opt;
+static const char TMP_DIR_TEMPLATE[] = "gbinder-test-remote-request-XXXXXX";
 
 #define STRICT_MODE_PENALTY_GATHER (0x40 << 16)
 #define BINDER_RPC_FLAGS (STRICT_MODE_PENALTY_GATHER)
@@ -73,7 +74,6 @@ test_null(
 
     g_assert(!gbinder_remote_request_ref(NULL));
     gbinder_remote_request_unref(NULL);
-    gbinder_remote_request_set_data(NULL, 0, NULL);
     gbinder_remote_request_init_reader(NULL, &reader);
     gbinder_remote_request_block(NULL);
     gbinder_remote_request_complete(NULL, NULL, 0);
@@ -325,8 +325,13 @@ test_to_local(
     g_assert(!memcmp(request_data, bytes->data, bytes->len));
     gbinder_local_request_unref(req2);
 
+    memset(&convert, 0, sizeof(convert));
+    convert.f = &convert_f;
+    convert.io = gbinder_driver_io(driver);
+    convert.protocol = gbinder_driver_protocol(driver);
+
     /* The same with gbinder_remote_request_translate_to_local() */
-    req2 = gbinder_remote_request_convert_to_local(req, NULL);
+    req2 = gbinder_remote_request_convert_to_local(req, &convert);
     data = gbinder_local_request_data(req2);
     offsets = gbinder_output_data_offsets(data);
     bytes = data->bytes;
@@ -338,11 +343,12 @@ test_to_local(
     g_assert(!memcmp(request_data, bytes->data, bytes->len));
     gbinder_local_request_unref(req2);
 
-    /* Different driver actually requires translation */
     memset(&convert, 0, sizeof(convert));
     convert.f = &convert_f;
     convert.io = gbinder_driver_io(driver2);
     convert.protocol = gbinder_driver_protocol(driver2);
+
+    /* Different driver actually requires translation */
     req2 = gbinder_remote_request_convert_to_local(req, &convert);
     data = gbinder_local_request_data(req2);
     offsets = gbinder_output_data_offsets(data);
@@ -353,6 +359,17 @@ test_to_local(
     g_assert(!gbinder_output_data_buffers_size(data));
     g_assert(bytes->len == sizeof(request_data_hidl));
     g_assert(!memcmp(request_data_hidl, bytes->data, bytes->len));
+    gbinder_local_request_unref(req2);
+
+    gbinder_remote_request_unref(req);
+    req = gbinder_remote_request_new(NULL, gbinder_rpc_protocol_for_device(dev),
+        0, 0);
+    req2 = gbinder_remote_request_convert_to_local(req, &convert);
+    data = gbinder_local_request_data(req2);
+    bytes = data->bytes;
+    g_assert(!gbinder_output_data_offsets(data));
+    g_assert(!gbinder_output_data_buffers_size(data));
+    g_assert(!bytes->len);
     gbinder_local_request_unref(req2);
 
     gbinder_remote_request_unref(req);
@@ -368,17 +385,8 @@ test_to_local(
 
 int main(int argc, char* argv[])
 {
-    const char* default_config_dir;
-    const char* default_config_file;
-    char* conf_dir = g_dir_make_tmp("gbinder-test-remote-request-XXXXXX", NULL);
-    char* conf_file = g_build_filename(conf_dir, "test.conf", NULL);
+    TestConfig test_config;
     int result;
-
-    /* Point gbinder_config_file to a non-existent file */
-    default_config_dir = gbinder_config_dir;
-    default_config_file = gbinder_config_file;
-    gbinder_config_dir = conf_dir;
-    gbinder_config_file = conf_file;
 
     g_test_init(&argc, &argv, NULL);
     g_test_add_func(TEST_PREFIX "null", test_null);
@@ -389,13 +397,9 @@ int main(int argc, char* argv[])
     g_test_add_func(TEST_PREFIX "string16", test_string16);
     g_test_add_func(TEST_PREFIX "to_local", test_to_local);
     test_init(&test_opt, argc, argv);
+    test_config_init(&test_config, TMP_DIR_TEMPLATE);
     result = g_test_run();
-
-    gbinder_config_dir = default_config_dir;
-    gbinder_config_file = default_config_file;
-    remove(conf_dir);
-    g_free(conf_dir);
-    g_free(conf_file);
+    test_config_cleanup(&test_config);
     return result;
 }
 

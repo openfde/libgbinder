@@ -1,5 +1,5 @@
 # -*- Mode: makefile-gmake -*-
 
-EXE = unit_servicemanager_aidl4
+EXE = binder-watch
 
 include ../common/Makefile

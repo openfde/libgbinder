@@ -16,7 +16,7 @@
 
 VERSION_MAJOR = 1
 VERSION_MINOR = 1
-VERSION_RELEASE = 34
+VERSION_RELEASE = 51
 
 # Version for pkg-config
 PCVERSION = $(VERSION_MAJOR).$(VERSION_MINOR).$(VERSION_RELEASE)
@@ -50,10 +50,10 @@ RELEASE_DEPS = libglibutil_release
 .PHONY: libglibutil_debug libglibutil_release
 
 libglibutil_debug:
-	make -C $(LIBGLIBUTIL_PATH) debug
+	$(MAKE) -C $(LIBGLIBUTIL_PATH) debug
 
 libglibutil_release:
-	make -C $(LIBGLIBUTIL_PATH) release
+	$(MAKE) -C $(LIBGLIBUTIL_PATH) release
 
 endif
 
@@ -105,7 +105,8 @@ SRC += \
   gbinder_servicemanager_aidl.c \
   gbinder_servicemanager_aidl2.c \
   gbinder_servicemanager_aidl3.c \
-  gbinder_servicemanager_aidl4.c \
+  gbinder_servicemanager_aidl5.c \
+  gbinder_servicemanager_aidl6.c \
   gbinder_servicemanager_hidl.c
 
 SRC += \
@@ -126,6 +127,7 @@ COVERAGE_BUILD_DIR = $(BUILD_DIR)/coverage
 # Tools and flags
 #
 
+PKG_CONFIG ?= pkg-config
 CC ?= $(CROSS_COMPILE)gcc
 STRIP ?= strip
 LD = $(CC)
@@ -133,25 +135,19 @@ WARNINGS = -Wall -Wstrict-aliasing -Wunused-result
 DEFINES += -DGLIB_VERSION_MAX_ALLOWED=GLIB_VERSION_2_32 \
   -DGLIB_VERSION_MIN_REQUIRED=GLIB_VERSION_MAX_ALLOWED
 INCLUDES += -I$(INCLUDE_DIR)
-BASE_FLAGS = -fPIC
+BASE_FLAGS = -fPIC -g
 FULL_CFLAGS = $(BASE_FLAGS) $(CFLAGS) $(DEFINES) $(WARNINGS) $(INCLUDES) \
-  -MMD -MP $(shell pkg-config --cflags $(PKGS))
+  -MMD -MP $(shell $(PKG_CONFIG) --cflags $(PKGS))
 FULL_LDFLAGS = $(BASE_FLAGS) $(LDFLAGS) -shared -Wl,-soname,$(LIB_SONAME) \
-  $(shell pkg-config --libs $(PKGS)) -lpthread
-DEBUG_FLAGS = -g
-RELEASE_FLAGS =
-COVERAGE_FLAGS = -g
+  $(shell $(PKG_CONFIG) --libs $(PKGS)) -lpthread
 
 KEEP_SYMBOLS ?= 0
-ifneq ($(KEEP_SYMBOLS),0)
-RELEASE_FLAGS += -g
-endif
 
-DEBUG_LDFLAGS = $(FULL_LDFLAGS) $(DEBUG_LIBS) $(DEBUG_FLAGS)
-RELEASE_LDFLAGS = $(FULL_LDFLAGS) $(RELEASE_LIBS) $(RELEASE_FLAGS)
-DEBUG_CFLAGS = $(FULL_CFLAGS) $(DEBUG_FLAGS) -DDEBUG
-RELEASE_CFLAGS = $(FULL_CFLAGS) $(RELEASE_FLAGS) -O2
-COVERAGE_CFLAGS = $(FULL_CFLAGS) $(COVERAGE_FLAGS) --coverage
+DEBUG_LDFLAGS = $(FULL_LDFLAGS) $(DEBUG_LIBS)
+RELEASE_LDFLAGS = $(FULL_LDFLAGS) $(RELEASE_LIBS)
+DEBUG_CFLAGS = $(FULL_CFLAGS) -DDEBUG
+RELEASE_CFLAGS = $(FULL_CFLAGS) -O2
+COVERAGE_CFLAGS = $(FULL_CFLAGS) -O0 --coverage -fprofile-update=atomic
 
 #
 # Files
@@ -237,8 +233,9 @@ print_release_path:
 	@echo $(RELEASE_BUILD_DIR)
 
 clean:
-	make -C test clean
-	make -C unit clean
+	$(MAKE) -C tools clean
+	$(MAKE) -C test clean
+	$(MAKE) -C unit clean
 	rm -fr test/coverage/results test/coverage/*.gcov
 	rm -f *~ $(SRC_DIR)/*~ $(INCLUDE_DIR)/*~
 	rm -fr $(BUILD_DIR) RPMS installroot
@@ -248,7 +245,7 @@ clean:
 	rm -f debian/libgbinder.install debian/libgbinder-dev.install
 
 test:
-	make -C unit test
+	$(MAKE) -C unit test
 
 $(BUILD_DIR):
 	mkdir -p $@

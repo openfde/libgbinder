@@ -1,9 +1,7 @@
 /*
+ * Copyright (C) 2026 Jolla Mobile Ltd
+ * Copyright (C) 2018-2024 Slava Monich <slava@monich.com>
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2022 Slava Monich <slava.monich@jolla.com>
- * Copyright (C) 2023 Slava Monich <slava@monich.com>
- *
- * You may use this file under the terms of BSD license as follows:
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -66,6 +64,11 @@ typedef struct binder_buffer_object_64 {
 #define BINDER_FLAG_ACCEPTS_FDS 0x100
 G_STATIC_ASSERT(sizeof(BinderObject64) == BUFFER_OBJECT_SIZE_64);
 
+#define TEST_BINDER_OBJECT_64(handle) \
+    TEST_INT32_BYTES(BINDER_TYPE_HANDLE), TEST_INT32_BYTES(0 /* flags */), \
+    TEST_INT32_BYTES(handle), TEST_INT32_BYTES(0 /* padding */), \
+    TEST_INT64_BYTES(0 /* cookie */ )
+
 static
 void
 test_init_reader(
@@ -110,9 +113,10 @@ void
 test_empty(
     void)
 {
-    GBinderReader reader;
+    GBinderReader reader, parcelable;
     gsize count = 1, elemsize = 1;
     gsize size = 1;
+    gboolean non_null;
 
     gbinder_reader_init(&reader, NULL, 0, 0);
     g_assert(gbinder_reader_at_end(&reader));
@@ -150,6 +154,17 @@ test_empty(
     g_assert(!gbinder_reader_read_string16(&reader));
     g_assert(!gbinder_reader_skip_string16(&reader));
     g_assert(!gbinder_reader_read_byte_array(&reader, &size));
+    /*
+     * gbinder_reader_start_parcelable() fails but still initializes
+     * the parcelable reading, which isn't suitable for passing to
+     * gbinder_reader_finish_parcelable, but it's handled more or less
+     * gracefully (with a warning being printed to the console)
+     */
+    g_assert(!gbinder_reader_start_parcelable(&reader, &parcelable, NULL));
+    g_assert(!gbinder_reader_start_parcelable(&reader, &parcelable, &non_null));
+    g_assert_false(non_null);
+    gbinder_reader_finish_parcelable(&parcelable);
+    g_assert_false(gbinder_reader_skip_parcelable(&reader));
 }
 
 /*==========================================================================*
@@ -194,6 +209,7 @@ void
 test_bool(
     void)
 {
+    const guint8 in_short[] = { 0 };
     const guint8 in_true[] = { TEST_INT8_BYTES_4(TRUE) };
     const guint8 in_false[] = { TEST_INT8_BYTES_4(FALSE) };
     gboolean out = FALSE;
@@ -203,10 +219,21 @@ test_bool(
 
     g_assert(driver);
     memset(&data, 0, sizeof(data));
+
+    /* not enough data */
     data.buffer = gbinder_buffer_new(driver,
-        g_memdup(&in_true, sizeof(in_true)), sizeof(in_true), NULL);
+        g_memdup(TEST_ARRAY_AND_SIZE(in_short)), sizeof(in_short), NULL);
+
+    gbinder_reader_init(&reader, &data, 0, data.buffer->size);
+    g_assert(!gbinder_reader_read_bool(&reader, NULL));
+    g_assert(!gbinder_reader_read_bool(&reader, &out));
+    g_assert(!gbinder_reader_at_end(&reader));
 
     /* true */
+    gbinder_buffer_free(data.buffer);
+    data.buffer = gbinder_buffer_new(driver,
+        g_memdup(TEST_ARRAY_AND_SIZE(in_true)), sizeof(in_true), NULL);
+
     gbinder_reader_init(&reader, &data, 0, data.buffer->size);
     g_assert(gbinder_reader_read_bool(&reader, NULL));
     g_assert(gbinder_reader_at_end(&reader));
@@ -219,7 +246,7 @@ test_bool(
     /* false */
     gbinder_buffer_free(data.buffer);
     data.buffer = gbinder_buffer_new(driver,
-        g_memdup(&in_false, sizeof(in_false)), sizeof(in_false), NULL);
+        g_memdup(TEST_ARRAY_AND_SIZE(in_false)), sizeof(in_false), NULL);
 
     gbinder_reader_init(&reader, &data, 0, data.buffer->size);
     g_assert(gbinder_reader_read_bool(&reader, NULL));
@@ -493,7 +520,7 @@ test_double(
 }
 
 /*==========================================================================*
- * string8
+ * cstring
  *==========================================================================*/
 
 typedef struct test_string_data {
@@ -504,28 +531,28 @@ typedef struct test_string_data {
     gboolean remaining;
 } TestStringData;
 
-static const guint8 test_string8_in_short [] = {
+static const guint8 test_cstring_in_short [] = {
     't', 'e', 's', 't', 0, 0, 0
 };
 
-static const guint8 test_string8_in_basic1 [] = {
+static const guint8 test_cstring_in_basic1 [] = {
     't', 'e', 's', 't', 0, 0, 0, 0
 };
 
-static const guint8 test_string8_in_basic2 [] = {
+static const guint8 test_cstring_in_basic2 [] = {
     't', 'e', 's', 't', 0, 0, 0, 0, 0
 };
 
-static const TestStringData test_string8_tests [] = {
-    { "short", TEST_ARRAY_AND_SIZE(test_string8_in_short), NULL,
-       sizeof(test_string8_in_short)},
-    { "ok1", TEST_ARRAY_AND_SIZE(test_string8_in_basic1), "test", 0 },
-    { "ok2", TEST_ARRAY_AND_SIZE(test_string8_in_basic2), "test", 1 }
+static const TestStringData test_cstring_tests [] = {
+    { "err", TEST_ARRAY_AND_SIZE(test_cstring_in_short), NULL,
+       sizeof(test_cstring_in_short)},
+    { "ok1", TEST_ARRAY_AND_SIZE(test_cstring_in_basic1), "test", 0 },
+    { "ok2", TEST_ARRAY_AND_SIZE(test_cstring_in_basic2), "test", 1 }
 };
 
 static
 void
-test_string8(
+test_cstring(
     gconstpointer test_data)
 {
     const TestStringData* test = test_data;
@@ -550,6 +577,125 @@ test_string8(
 }
 
 /*==========================================================================*
+ * string8
+ *==========================================================================*/
+
+static const guint8 test_string8_in_null [] = {
+    TEST_INT32_BYTES(-1)
+};
+
+static const guint8 test_string8_in_invalid [] = {
+    TEST_INT32_BYTES(-2)
+};
+
+static const guint8 test_string8_in_too_long [] = {
+    TEST_INT32_BYTES(INT32_MAX)
+};
+
+static const guint8 test_string8_in_short1 [] = {
+    0x00
+};
+
+static const guint8 test_string8_in_short2 [] = {
+    TEST_INT32_BYTES(3), 'f', 'o', 'o'
+};
+
+static const guint8 test_string8_in_noterm [] = {
+    TEST_INT32_BYTES(3), 'f', 'o', 'o', 'x' /* Missing terminator */
+};
+
+static const guint8 test_string8_in_basic1 [] = {
+    TEST_INT32_BYTES(3), 'f', 'o', 'o', 0x00
+};
+
+static const guint8 test_string8_in_basic2 [] = {
+    TEST_INT32_BYTES(3), 'f', 'o', 'o', 0x00, 0x00
+};
+
+static const TestStringData test_string8_tests [] = {
+    { "invalid", TEST_ARRAY_AND_SIZE(test_string8_in_invalid), NULL,
+        sizeof(test_string8_in_invalid) },
+    { "too_long", TEST_ARRAY_AND_SIZE(test_string8_in_too_long), NULL,
+        sizeof(test_string8_in_too_long) },
+    { "short1", TEST_ARRAY_AND_SIZE(test_string8_in_short1), NULL,
+        sizeof(test_string8_in_short1) },
+    { "short2", TEST_ARRAY_AND_SIZE(test_string8_in_short2), NULL,
+        sizeof(test_string8_in_short2) },
+    { "noterm", TEST_ARRAY_AND_SIZE(test_string8_in_noterm), NULL,
+        sizeof(test_string8_in_noterm) },
+    { "ok1", TEST_ARRAY_AND_SIZE(test_string8_in_basic1), "foo", 0 },
+    { "ok2", TEST_ARRAY_AND_SIZE(test_string8_in_basic2), "foo", 1 }
+};
+
+static
+void
+test_string8_null(
+    void)
+{
+    GBinderDriver* driver = gbinder_driver_new(GBINDER_DEFAULT_BINDER, NULL);
+    GBinderReader reader;
+    GBinderReaderData data;
+    gsize len = 1;
+    char dummy;
+    const char* out = &dummy;
+
+    g_assert(driver);
+    memset(&data, 0, sizeof(data));
+    data.buffer = gbinder_buffer_new(driver,
+        g_memdup(TEST_ARRAY_AND_SIZE(test_string8_in_null)),
+        sizeof(test_string8_in_null), NULL);
+
+    gbinder_reader_init(&reader, &data, 0, sizeof(test_string8_in_null));
+    g_assert(gbinder_reader_skip_nullable_string8(&reader));
+    g_assert(gbinder_reader_at_end(&reader));
+
+    gbinder_reader_init(&reader, &data, 0, sizeof(test_string8_in_null));
+    g_assert(gbinder_reader_read_nullable_string8(&reader, &out, &len));
+    g_assert(gbinder_reader_at_end(&reader));
+    g_assert(!out);
+    g_assert(!len);
+
+    gbinder_buffer_free(data.buffer);
+    gbinder_driver_unref(driver);
+}
+
+static
+void
+test_string8(
+    gconstpointer test_data)
+{
+    const TestStringData* test = test_data;
+    GBinderDriver* driver = gbinder_driver_new(GBINDER_DEFAULT_BINDER, NULL);
+    GBinderReader r;
+    GBinderReaderData data;
+    const gboolean valid = (test->out != NULL);
+    const char* out = NULL;
+    gsize len = 0;
+
+    g_assert(driver);
+    memset(&data, 0, sizeof(data));
+    data.buffer = gbinder_buffer_new(driver, g_memdup(test->in, test->in_size),
+        test->in_size, NULL);
+
+    gbinder_reader_init(&r, &data, 0, test->in_size);
+    g_assert(gbinder_reader_skip_nullable_string8(&r) == valid);
+    g_assert(gbinder_reader_at_end(&r) == (!test->remaining));
+    g_assert_cmpuint(gbinder_reader_bytes_remaining(&r), == ,test->remaining);
+
+    gbinder_reader_init(&r, &data, 0, test->in_size);
+    g_assert(gbinder_reader_read_nullable_string8(&r, &out, &len) == valid);
+    g_assert(gbinder_reader_at_end(&r) == (!test->remaining));
+    g_assert_cmpuint(gbinder_reader_bytes_remaining(&r), == ,test->remaining);
+    if (valid) {
+        g_assert_cmpstr(out, ==, test->out);
+        g_assert_cmpuint(len, == ,strlen(test->out));
+    }
+
+    gbinder_buffer_free(data.buffer);
+    gbinder_driver_unref(driver);
+}
+
+/*==========================================================================*
  * string16
  *==========================================================================*/
 
@@ -561,10 +707,20 @@ static const guint8 test_string16_in_invalid [] = {
     TEST_INT32_BYTES(-2)
 };
 
+static const guint8 test_string16_in_too_long [] = {
+    TEST_INT32_BYTES(INT32_MAX)
+};
+
 static const guint8 test_string16_in_short [] = {
     TEST_INT32_BYTES(3),
     TEST_INT16_BYTES('f'), TEST_INT16_BYTES('o'),
     TEST_INT16_BYTES('o'), 0x00
+};
+
+static const guint8 test_string16_in_noterm [] = {
+    TEST_INT32_BYTES(3),
+    TEST_INT16_BYTES('f'), TEST_INT16_BYTES('o'),
+    TEST_INT16_BYTES('o'), TEST_INT16_BYTES('o') /* Missing terminator */
 };
 
 static const guint8 test_string16_in_basic1 [] = {
@@ -582,8 +738,12 @@ static const guint8 test_string16_in_basic2 [] = {
 static const TestStringData test_string16_tests [] = {
     { "invalid", TEST_ARRAY_AND_SIZE(test_string16_in_invalid), NULL,
         sizeof(test_string16_in_invalid) },
+    { "too_long", TEST_ARRAY_AND_SIZE(test_string16_in_too_long), NULL,
+        sizeof(test_string16_in_too_long) },
     { "short", TEST_ARRAY_AND_SIZE(test_string16_in_short), NULL,
         sizeof(test_string16_in_short) },
+    { "noterm", TEST_ARRAY_AND_SIZE(test_string16_in_noterm), NULL,
+        sizeof(test_string16_in_noterm) },
     { "ok1", TEST_ARRAY_AND_SIZE(test_string16_in_basic1), "foo", 0 },
     { "ok2", TEST_ARRAY_AND_SIZE(test_string16_in_basic2), "foo", 1 }
 };
@@ -1681,9 +1841,7 @@ test_buffer(
         TEST_INT64_BYTES((uintptr_t)&data2), TEST_INT64_BYTES(sizeof(data2)),
         TEST_INT64_BYTES(0), TEST_INT64_BYTES(0),
         /* Not a buffer object */
-        TEST_INT32_BYTES(BINDER_TYPE_HANDLE), TEST_INT32_BYTES(0),
-        TEST_INT64_BYTES(0), TEST_INT64_BYTES(0),
-        TEST_INT64_BYTES(0), TEST_INT64_BYTES(0)
+        TEST_BINDER_OBJECT_64(0)
     };
     GBinderIpc* ipc = gbinder_ipc_new(GBINDER_DEFAULT_HWBINDER, NULL);
     GBinderBuffer* buf = gbinder_buffer_new(ipc->driver,
@@ -1726,18 +1884,18 @@ test_buffer(
 
 static
 void
-test_parcelable(
+test_parcelable1(
     void)
 {
     const guint8 input_null_header[] = {
-        TEST_INT32_BYTES(0)
+        TEST_INT32_BYTES(kNullParcelableFlag)
     };
     const guint8 input_broken_header[] = {
-        TEST_INT32_BYTES(1),
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
         TEST_INT32_BYTES(1)
     };
     const guint8 input_non_null_header[] = {
-        TEST_INT32_BYTES(1),
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
         /* Size must be size of itself + payload */
         TEST_INT32_BYTES(sizeof(gint32) * 3)
     };
@@ -1746,11 +1904,14 @@ test_parcelable(
         TEST_INT32_BYTES(20)
     };
     gpointer in;
-    gsize in_size, out_size;
-    const void* out = 0;
+    gboolean ok, non_null;
+    gsize size, in_size, out_size;
+    const void* out;
     GBinderDriver* driver = gbinder_driver_new(GBINDER_DEFAULT_BINDER, NULL);
-    GBinderReader reader;
+    GBinderReader reader, p;
     GBinderReaderData data;
+    gint32 value[2];
+    void* objects[1];
 
     g_assert(driver);
     memset(&data, 0, sizeof(data));
@@ -1758,33 +1919,60 @@ test_parcelable(
     /* Missing payload */
     test_init_reader(driver, &data, &reader,
         TEST_ARRAY_AND_SIZE(input_non_null_header));
-    out = gbinder_reader_read_parcelable(&reader, &out_size);
-    g_assert(!out);
+    out_size = 1;
+    ok = TRUE;
+    g_assert_null(gbinder_reader_read_parcelable(&reader, &out_size));
+    g_assert_null(gbinder_reader_read_parcelable2(&reader, &out_size, &ok));
+    g_assert_cmpuint(gbinder_reader_bytes_read(&reader), == ,0);
     g_assert_cmpuint(out_size, == ,0);
+    g_assert_false(ok);
     gbinder_buffer_free(data.buffer);
 
     /* Broken headers */
     test_init_reader(driver, &data, &reader, input_broken_header, 4);
-    out = gbinder_reader_read_parcelable(&reader, &out_size);
-    g_assert(!out);
+    out_size = 1;
+    ok = TRUE;
+    g_assert_null(gbinder_reader_read_parcelable(&reader, &out_size));
+    g_assert_null(gbinder_reader_read_parcelable2(&reader, &out_size, &ok));
+    g_assert_cmpuint(gbinder_reader_bytes_read(&reader), == ,0);
     g_assert_cmpuint(out_size, == ,0);
+    g_assert_false(ok);
     gbinder_buffer_free(data.buffer);
 
     test_init_reader(driver, &data, &reader,
         TEST_ARRAY_AND_SIZE(input_broken_header));
-    out = gbinder_reader_read_parcelable(&reader, &out_size);
-    g_assert(!out);
+    out_size = 1;
+    ok = TRUE;
+    g_assert_null(gbinder_reader_read_parcelable(&reader, &out_size));
+    g_assert_null(gbinder_reader_read_parcelable2(&reader, &out_size, &ok));
+    g_assert_cmpuint(gbinder_reader_bytes_read(&reader), == ,0);
     g_assert_cmpuint(out_size, == ,0);
+    g_assert_false(ok);
     gbinder_buffer_free(data.buffer);
 
     /* Null */
     test_init_reader(driver, &data, &reader,
         TEST_ARRAY_AND_SIZE(input_null_header));
     gbinder_reader_init(&reader, &data, 0, sizeof(input_null_header));
-    out = gbinder_reader_read_parcelable(&reader, &out_size);
-    g_assert(!out);
+    g_assert_null(gbinder_reader_read_parcelable2(&reader, NULL, NULL));
+    g_assert_cmpuint(gbinder_reader_bytes_read(&reader), > ,0);
+    g_assert_true(gbinder_reader_at_end(&reader));
+
+    gbinder_reader_init(&reader, &data, 0, sizeof(input_null_header));
+    out_size = 1;
+    ok = FALSE;
+    g_assert_null(gbinder_reader_read_parcelable2(&reader, &out_size, &ok));
+    g_assert_true(gbinder_reader_at_end(&reader));
     g_assert_cmpuint(out_size, == ,0);
+    g_assert_true(ok);
+
+    gbinder_reader_init(&reader, &data, 0, sizeof(input_null_header));
+    non_null = TRUE;
+    g_assert_true(gbinder_reader_start_parcelable(&reader, &p, &non_null));
+    g_assert_false(non_null);
     g_assert(gbinder_reader_at_end(&reader));
+    g_assert(gbinder_reader_at_end(&p));
+    gbinder_reader_finish_parcelable(&p);
     gbinder_buffer_free(data.buffer);
 
     /* Non-null */
@@ -1796,11 +1984,13 @@ test_parcelable(
     data.buffer = gbinder_buffer_new(driver, in, in_size, NULL);
 
     gbinder_reader_init(&reader, &data, 0, in_size);
-    out = gbinder_reader_read_parcelable(&reader, &out_size);
-    g_assert(memcmp(&input_non_null_payload, out,
-        sizeof(input_non_null_payload)) == 0);
-    g_assert_cmpuint(out_size, == ,sizeof(input_non_null_payload));
-    g_assert(gbinder_reader_at_end(&reader));
+    out_size = 0;
+    ok = FALSE;
+    out = gbinder_reader_read_parcelable2(&reader, &out_size, &ok);
+    g_assert_true(ok);
+    g_assert_cmpmem(&input_non_null_payload, sizeof(input_non_null_payload),
+        out, out_size);
+    g_assert_true(gbinder_reader_at_end(&reader));
 
     /* And verify NULL tolerance for the size parameter */
     gbinder_reader_init(&reader, &data, 0, in_size);
@@ -1808,8 +1998,278 @@ test_parcelable(
     g_assert(memcmp(&input_non_null_payload, out,
         sizeof(input_non_null_payload)) == 0);
 
+    /* Test the nested reader */
+    objects[0] = NULL; /* empty but non-null object list */
+    data.objects = objects;
+    gbinder_reader_init(&reader, &data, 0, in_size);
+    non_null = FALSE;
+    g_assert_true(gbinder_reader_start_parcelable(&reader, &p, &non_null));
+    g_assert_true(non_null);
+    g_assert_true(gbinder_reader_at_end(&reader));
+
+    memset(value, 0, sizeof(value));
+    g_assert(gbinder_reader_read_int32(&p, value));
+    g_assert(gbinder_reader_read_int32(&p, value + 1));
+    g_assert(gbinder_reader_at_end(&p));
+    g_assert_cmpuint(value[0], == ,10);
+    g_assert_cmpuint(value[1], == ,20);
+    gbinder_reader_finish_parcelable(&p);
+
+    /* Poke the same thing with gbinder_reader_read_parcelable */
+    gbinder_reader_init(&reader, &data, 0, in_size);
+    g_assert_nonnull(gbinder_reader_read_parcelable(&reader, &size));
+    g_assert_cmpuint(size, == ,sizeof(input_non_null_payload));
+    g_assert_true(gbinder_reader_at_end(&reader));
+
+    /* And gbinder_reader_skip_parcelable */
+    gbinder_reader_init(&reader, &data, 0, in_size);
+    g_assert_true(gbinder_reader_skip_parcelable(&reader));
+    g_assert_true(gbinder_reader_at_end(&reader));
+
     gbinder_buffer_free(data.buffer);
     gbinder_driver_unref(driver);
+}
+
+static
+void
+test_parcelable2(
+    void)
+{
+    /* Using 64-bit I/O */
+    const guint8 input[] = {
+        /*
+         * parcelable p1 {
+         *   parcelable p2 {
+         *     object obj1;
+         *     parcelable p3 {
+         *       object obj2;
+         *     };
+         *   };
+         *   object obj3;
+         * };
+         *
+         * parcelable p4 {
+         *   int i1 = 40;
+         *   parcelable p5 {
+         *     int i2 = 41;
+         *     object obj4;
+         *   };
+         * };
+         *
+         * int i3 = 42;
+         * object obj5;
+         *
+         * parcelable p6 {
+         *   int i4 = 43;
+         *   object obj6;
+         * };
+         *
+         * object obj7;
+         * parcelable p7 = null;
+         * parcelable p8 {};
+         */
+        /* Parcelable #1 */
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
+        TEST_INT32_BYTES(4 /* this field */ +
+                         8 /* parcelable #2 header */ +
+                         BINDER_OBJECT_SIZE_64 /* obj1 */ +
+                         8 /* parcelable #3 header */ +
+                         BINDER_OBJECT_SIZE_64 /* obj2 */ +
+                         BINDER_OBJECT_SIZE_64 /* obj3 */),
+
+          /* Parcelable #2 */
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
+        TEST_INT32_BYTES(4 /* this field */ +
+                         BINDER_OBJECT_SIZE_64 /* obj1 */ +
+                         8 /* parcelable #3 header */ +
+                         BINDER_OBJECT_SIZE_64 /* obj2 */),
+        TEST_BINDER_OBJECT_64(1), /* obj1 */
+
+        /* Parcelable #3 */
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
+        TEST_INT32_BYTES(4 /* this field */ +
+                         BINDER_OBJECT_SIZE_64 /* obj2 */),
+        TEST_BINDER_OBJECT_64(2), /* obj2 */
+        /* End of parcelable #3 */
+        /* End of parcelable #2 */
+
+        TEST_BINDER_OBJECT_64(3), /* obj3 */
+        /* End of parcelable #1 */
+
+        /* Parcelable #4 */
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
+        TEST_INT32_BYTES(4 /* this field */ +
+                         4 /* i1 */ +
+                         8 /* parcelable #5 header */ +
+                         4 /* i2 */ +
+                         BINDER_OBJECT_SIZE_64 /* obj4 */),
+        TEST_INT32_BYTES(40), /* i1 */
+        /* Parcelable #5 */
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
+        TEST_INT32_BYTES(4 /* this field */ +
+                         4 /* i2 */ +
+                         BINDER_OBJECT_SIZE_64 /* obj4 */),
+        TEST_INT32_BYTES(41), /* i2 */
+        TEST_BINDER_OBJECT_64(4), /* obj4 */
+        /* End of parcelable #5 */
+        /* End of parcelable #4 */
+
+        TEST_INT32_BYTES(42), /* i3 */
+        TEST_BINDER_OBJECT_64(5), /* obj5 */
+
+        /* Parcelable #6 */
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
+        TEST_INT32_BYTES(4 /* this field */ +
+                         4 /* i4 */ +
+                         BINDER_OBJECT_SIZE_64 /* obj6 */),
+        TEST_INT32_BYTES(43),
+        TEST_BINDER_OBJECT_64(6), /* obj6 */
+        /* End of parcelable #6 */
+
+        TEST_BINDER_OBJECT_64(7), /* obj7 */
+
+        /* Parcelable #7 (null) */
+        TEST_INT32_BYTES(kNullParcelableFlag),
+
+        /* Parcelable #8 (empty) */
+        TEST_INT32_BYTES(kNonNullParcelableFlag),
+        TEST_INT32_BYTES(4 /* this field */)
+    };
+    const gsize object1_offset =
+        8 /* parcelable #1 header */ +
+        8 /* parcelable #2 header */;
+    const gsize object2_offset = object1_offset +
+        BINDER_OBJECT_SIZE_64 /* binder object #1 */ +
+        8 /* parcelable #3 header */;
+    const gsize object3_offset = object2_offset +
+        BINDER_OBJECT_SIZE_64 /* binder object #2 */;
+    const gsize object4_offset = object3_offset +
+        BINDER_OBJECT_SIZE_64 /* binder object #3 */ +
+        8 /* parcelable #4 header */ + 4 /* i1 */ +
+        8 /* parcelable #5 header */ + 4 /* i2 */;
+    const gsize object5_offset = object4_offset +
+        BINDER_OBJECT_SIZE_64 /* binder object #4 */ +
+        4 /* i3 */;
+    const gsize object6_offset = object5_offset +
+        BINDER_OBJECT_SIZE_64 /* binder object #5 */ +
+        8 /* parcelable #6 header */ + 4 /* i4 */;
+    const gsize object7_offset = object6_offset +
+        BINDER_OBJECT_SIZE_64 /* binder object #6 */;
+    GBinderIpc* ipc = gbinder_ipc_new(GBINDER_DEFAULT_HWBINDER, NULL);
+    GBinderBuffer* buf = gbinder_buffer_new(ipc->driver,
+        g_memdup(input, sizeof(input)), sizeof(input), NULL);
+    GBinderRemoteObject* obj = NULL;
+    GBinderReaderData data;
+    GBinderReader reader, p1, p2, p3, p4;
+    gboolean ok, non_null;
+    guint32 val;
+    gsize size;
+    void* objects[8];
+
+    g_assert(ipc);
+    memset(&data, 0, sizeof(data));
+    data.buffer = buf;
+    data.reg = gbinder_ipc_object_registry(ipc);
+    data.objects = objects;
+    objects[0] = buf->data + object1_offset;
+    objects[1] = buf->data + object2_offset;
+    objects[2] = buf->data + object3_offset;
+    objects[3] = buf->data + object4_offset;
+    objects[4] = buf->data + object5_offset;
+    objects[5] = buf->data + object6_offset;
+    objects[6] = buf->data + object7_offset;
+    objects[7] = NULL;
+    gbinder_reader_init(&reader, &data, 0, buf->size);
+
+    /* Nested reader for parcelable #1 */
+    non_null = FALSE;
+    g_assert_true(gbinder_reader_start_parcelable(&reader, &p1, &non_null));
+    g_assert_true(non_null);
+
+    /* Nested reader for parcelable #2 */
+    non_null = FALSE;
+    g_assert_true(gbinder_reader_start_parcelable(&p1, &p2, &non_null));
+    g_assert_true(non_null);
+
+    /* Read binder object #1 from parcelable #2 */
+    g_assert_true(gbinder_reader_read_nullable_object(&p2, &obj));
+    g_assert_nonnull(obj);
+    g_assert_cmpuint(obj->handle, == ,1);
+    gbinder_remote_object_unref(obj);
+
+    /* Nested reader for parcelable #3 */
+    non_null = FALSE;
+    g_assert_true(gbinder_reader_start_parcelable(&p2, &p3, &non_null));
+    g_assert_true(non_null);
+    g_assert_false(gbinder_reader_at_end(&p3));
+    /* Skip binder object #2 */
+    gbinder_reader_finish_parcelable(&p3); /* done with parcelable #3 */
+    gbinder_reader_finish_parcelable(&p2); /* done with parcelable #2 */
+    g_assert_true(gbinder_reader_at_end(&p3));
+    g_assert_true(gbinder_reader_at_end(&p2));
+
+    /* Read binder object #3 from parcelable #1 */
+    g_assert_true(gbinder_reader_read_nullable_object(&p1, &obj));
+    g_assert_nonnull(obj);
+    g_assert_cmpuint(obj->handle, == ,3);
+    gbinder_remote_object_unref(obj);
+    gbinder_reader_finish_parcelable(&p1); /* done with parcelable #1 */
+
+    /* Parcelable #4 */
+    g_assert_true(gbinder_reader_start_parcelable(&reader, &p4, NULL));
+    g_assert_false(gbinder_reader_at_end(&p4));
+
+    /* i1 */
+    val = 0;
+    g_assert_true(gbinder_reader_read_uint32(&p4, &val));
+    g_assert_cmpuint(val, == ,40);
+
+    /* Parcelable #5 */
+    ok = FALSE;
+    size = 0;
+    g_assert_nonnull(gbinder_reader_read_parcelable2(&p4, &size, &ok));
+    g_assert_cmpuint(size, == ,4 /* i2 */ + BINDER_OBJECT_SIZE_64 /* obj4 */);
+    g_assert_true(ok);
+    /* Object #4 gets skipped */
+
+    /* i3 */
+    val = 0;
+    g_assert_true(gbinder_reader_read_uint32(&reader, &val));
+    g_assert_cmpuint(val, == ,42);
+
+    /* obj5 */
+    g_assert_true(gbinder_reader_read_nullable_object(&reader, &obj));
+    g_assert_nonnull(obj);
+    g_assert_cmpuint(obj->handle, == ,5);
+    gbinder_remote_object_unref(obj);
+
+    /* Parcelable #6 */
+    g_assert_true(gbinder_reader_skip_parcelable(&reader));
+    /* Object #6 gets skipped */
+
+    /* obj7 */
+    g_assert_true(gbinder_reader_read_nullable_object(&reader, &obj));
+    g_assert_nonnull(obj);
+    g_assert_cmpuint(obj->handle, == ,7);
+    gbinder_remote_object_unref(obj);
+
+    /* Parcelable #7 (null) */
+    ok = FALSE;
+    g_assert_null(gbinder_reader_read_parcelable2(&reader, NULL, &ok));
+    g_assert_true(ok);
+
+    /* Parcelable #8 (empty) */
+    ok = FALSE;
+    g_assert_nonnull(gbinder_reader_read_parcelable2(&reader, &size, &ok));
+    g_assert_cmpuint(size, == ,0);
+    g_assert_true(ok);
+
+    /* Now we must have reached the end */
+    g_assert_true(gbinder_reader_at_end(&reader));
+
+    gbinder_buffer_free(buf);
+    gbinder_ipc_unref(ipc);
+    test_binder_exit_wait(&test_opt, NULL);
 }
 
 /*==========================================================================*
@@ -1822,11 +2282,7 @@ test_object(
     void)
 {
     /* Using 64-bit I/O */
-    static const guint8 input[] = {
-        TEST_INT32_BYTES(BINDER_TYPE_HANDLE), TEST_INT32_BYTES(0),
-        TEST_INT32_BYTES(1 /* handle*/), TEST_INT32_BYTES(0),
-        TEST_INT64_BYTES(0)
-    };
+    static const guint8 input[] = { TEST_BINDER_OBJECT_64(1) };
     GBinderIpc* ipc = gbinder_ipc_new(GBINDER_DEFAULT_HWBINDER, NULL);
     GBinderBuffer* buf = gbinder_buffer_new(ipc->driver,
         g_memdup(input, sizeof(input)), sizeof(input), NULL);
@@ -1887,6 +2343,38 @@ test_object_invalid(
         TEST_INT64_BYTES(1 /* handle*/), TEST_INT64_BYTES(0)
     };
     GBinderIpc* ipc = gbinder_ipc_new(GBINDER_DEFAULT_HWBINDER, NULL);
+    GBinderBuffer* buf = gbinder_buffer_new(ipc->driver,
+        g_memdup(input, sizeof(input)), sizeof(input), NULL);
+    GBinderRemoteObject* obj = NULL;
+    GBinderReaderData data;
+    GBinderReader reader;
+
+    g_assert(ipc);
+    memset(&data, 0, sizeof(data));
+    data.buffer = buf;
+    data.reg = gbinder_ipc_object_registry(ipc);
+    data.objects = g_new(void*, 2);
+    data.objects[0] = buf->data;
+    data.objects[1] = NULL;
+    gbinder_reader_init(&reader, &data, 0, buf->size);
+
+    g_assert(!gbinder_reader_read_nullable_object(&reader, &obj));
+    g_assert(!obj);
+
+    g_free(data.objects);
+    gbinder_buffer_free(buf);
+    gbinder_ipc_unref(ipc);
+    test_binder_exit_wait(&test_opt, NULL);
+}
+
+static
+void
+test_object_truncated_aidl(
+    void)
+{
+    /* AIDL3 requires a 4-byte stability trailer after flat_binder_object. */
+    static const guint8 input[] = { TEST_BINDER_OBJECT_64(1) };
+    GBinderIpc* ipc = gbinder_ipc_new(GBINDER_DEFAULT_BINDER, "aidl3");
     GBinderBuffer* buf = gbinder_buffer_new(ipc->driver,
         g_memdup(input, sizeof(input)), sizeof(input), NULL);
     GBinderRemoteObject* obj = NULL;
@@ -2434,6 +2922,15 @@ int main(int argc, char* argv[])
     g_test_add_func(TEST_("float"), test_float);
     g_test_add_func(TEST_("double"), test_double);
 
+    for (i = 0; i < G_N_ELEMENTS(test_cstring_tests); i++) {
+        const TestStringData* test = test_cstring_tests + i;
+        char* path = g_strconcat(TEST_("cstring/"), test->name, NULL);
+
+        g_test_add_data_func(path, test, test_cstring);
+        g_free(path);
+    }
+
+    g_test_add_func(TEST_("string8/null"), test_string8_null);
     for (i = 0; i < G_N_ELEMENTS(test_string8_tests); i++) {
         const TestStringData* test = test_string8_tests + i;
         char* path = g_strconcat(TEST_("string8/"), test->name, NULL);
@@ -2497,9 +2994,11 @@ int main(int argc, char* argv[])
     g_test_add_func(TEST_("hidl_string/6"), test_hidl_string6);
     g_test_add_func(TEST_("hidl_string/7"), test_hidl_string7);
     g_test_add_func(TEST_("buffer"), test_buffer);
-    g_test_add_func(TEST_("parcelable"), test_parcelable);
+    g_test_add_func(TEST_("parcelable/1"), test_parcelable1);
+    g_test_add_func(TEST_("parcelable/2"), test_parcelable2);
     g_test_add_func(TEST_("object/valid"), test_object);
     g_test_add_func(TEST_("object/invalid"), test_object_invalid);
+    g_test_add_func(TEST_("object/truncated_aidl"), test_object_truncated_aidl);
     g_test_add_func(TEST_("object/no_reg"), test_object_no_reg);
     g_test_add_func(TEST_("vec"), test_vec);
     g_test_add_func(TEST_("hidl_string_vec/1"), test_hidl_string_vec1);

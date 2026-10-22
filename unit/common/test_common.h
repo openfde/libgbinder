@@ -1,8 +1,7 @@
 /*
+ * Copyright (C) 2026 Jolla Mobile Ltd
+ * Copyright (C) 2018-2023 Slava Monich <slava@monich.com>
  * Copyright (C) 2018-2021 Jolla Ltd.
- * Copyright (C) 2018-2021 Slava Monich <slava.monich@jolla.com>
- *
- * You may use this file under the terms of BSD license as follows:
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -40,12 +39,29 @@ typedef struct test_opt {
     int flags;
 } TestOpt;
 
+typedef struct test_config {
+    const char* default_config_dir;
+    const char* default_config_file;
+    char* config_dir;
+    char* non_existent_config_file;
+} TestConfig;
+
 /* Should be invoked after g_test_init */
 void
 test_init(
     TestOpt* opt,
     int argc,
     char* argv[]);
+
+/* Creates empty test config dir */
+void
+test_config_init(
+    TestConfig* config,
+    const char* template);
+
+void
+test_config_cleanup(
+    TestConfig* config);
 
 /* Run loop with a timeout */
 void
@@ -74,6 +90,12 @@ void
 test_run_in_context(
     const TestOpt* opt,
     GTestFunc func);
+
+void
+test_run_in_context_param(
+    const TestOpt* opt,
+    GTestDataFunc func,
+    gconstpointer param);
 
 #define TEST_TIMEOUT_SEC (20)
 

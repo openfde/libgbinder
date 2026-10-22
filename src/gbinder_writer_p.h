@@ -1,6 +1,7 @@
 /*
+ * Copyright (C) 2018-2026 Slava Monich <slava@monich.com>
+ * Copyright (C) 2025 Jolla Mobile Ltd.
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2022 Slava Monich <slava.monich@jolla.com>
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -49,7 +50,8 @@ typedef struct gbinder_writer_data {
 void
 gbinder_writer_init(
     GBinderWriter* writer,
-    GBinderWriterData* data)
+    GBinderWriterData* data,
+    guint offset)
     GBINDER_INTERNAL;
 
 void

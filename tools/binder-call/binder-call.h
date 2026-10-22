@@ -1,7 +1,6 @@
 /*
- * Copyright (C) 2018-2021 Jolla Ltd.
- * Copyright (C) 2018-2021 Slava Monich <slava.monich@jolla.com>
- * Copyright (C) 2021 Gary Wang <gary.wang@canonical.com>
+ * Copyright (C) 2026 Jolla Mobile Ltd
+ * Copyright (C) 2021-2022 Jolla Ltd.
  *
  * You may use this file under the terms of BSD license as follows:
  *
@@ -31,31 +30,67 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef GBINDER_SERVICEMANAGER_AIDL_PRIVATE_H
-#define GBINDER_SERVICEMANAGER_AIDL_PRIVATE_H
+#ifndef BINDER_CALL_H__
+#define BINDER_CALL_H__
 
-#include "gbinder_servicemanager_aidl.h"
+#include <gbinder.h>
 
-char**
-gbinder_servicemanager_aidl3_list(
-    GBinderServiceManager* manager,
-    const GBinderIpcSyncApi* api)
-    GBINDER_INTERNAL;
+typedef struct app_options {
+    char* dev;
+    gboolean oneway;
+    gboolean aidl;
+    gint transaction;
+    int argc;
+    char** argv;
+} AppOptions;
 
-GBinderRemoteObject*
-gbinder_servicemanager_aidl3_get_service(
-    GBinderServiceManager* manager,
-    const char* name,
-    int* status,
-    const GBinderIpcSyncApi* api)
-    GBINDER_INTERNAL;
+typedef struct app {
+    const AppOptions* opt;
+    GMainLoop* loop;
+    GBinderServiceManager* sm;
+    GBinderWriter writer;
+    GBinderReader reader;
+    int code;
+    int rargc;
+    int ret;
+} App;
 
-#endif /* GBINDER_SERVICEMANAGER_AIDL_PRIVATE_H */
+enum TYPE_INFO {
+    INT8_TYPE = 0,
+    INT32_TYPE,
+    INT64_TYPE,
+    FLOAT_TYPE,
+    DOUBLE_TYPE,
+    STRING8_TYPE,
+    STRING16_TYPE,
+    HSTRING_TYPE,
+    STRUCT_TYPE,
+    VECTOR_TYPE
+};
 
-/*
- * Local Variables:
- * mode: C
- * c-basic-offset: 4
- * indent-tabs-mode: nil
- * End:
- */
+struct type_info {
+    enum TYPE_INFO type;
+    void* data;
+};
+
+struct value_info {
+    enum TYPE_INFO type;
+    void* value;
+};
+
+struct transaction_and_reply {
+    GList* tree_transaction;
+    GList* tree_reply;
+};
+
+int
+cmdline_parse(
+    App* app);
+
+int
+cmdlinelex(
+    void* args);
+
+extern struct transaction_and_reply* ast;
+
+#endif

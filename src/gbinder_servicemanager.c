@@ -1,8 +1,7 @@
 /*
  * Copyright (C) 2018-2022 Jolla Ltd.
- * Copyright (C) 2018-2023 Slava Monich <slava@monich.com>
- *
- * You may use this file under the terms of BSD license as follows:
+ * Copyright (C) 2018-2024 Slava Monich <slava@monich.com>
+ * Copyright (C) 2026 Jolla Mobile Ltd
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -81,12 +80,14 @@ static const GBinderServiceManagerType gbinder_servicemanager_types[] = {
     { "aidl", gbinder_servicemanager_aidl_get_type },
     { "aidl2", gbinder_servicemanager_aidl2_get_type },
     { "aidl3", gbinder_servicemanager_aidl3_get_type },
-    { "aidl4", gbinder_servicemanager_aidl4_get_type },
+    { "aidl4", gbinder_servicemanager_aidl3_get_type },
+    { "aidl5", gbinder_servicemanager_aidl5_get_type },
+    { "aidl6", gbinder_servicemanager_aidl6_get_type },
     { "hidl", gbinder_servicemanager_hidl_get_type }
 };
 
 #define SERVICEMANAGER_TYPE_AIDL (gbinder_servicemanager_types + 0)
-#define SERVICEMANAGER_TYPE_HIDL (gbinder_servicemanager_types + 4)
+#define SERVICEMANAGER_TYPE_HIDL (gbinder_servicemanager_types + 6)
 #define SERVICEMANAGER_TYPE_DEFAULT SERVICEMANAGER_TYPE_AIDL
 
 static GHashTable* gbinder_servicemanager_map = NULL;
@@ -993,36 +994,33 @@ gbinder_servicemanager_remove_handlers(
     guint count) /* Since 1.0.25 */
 {
     if (G_LIKELY(self) && G_LIKELY(ids) && G_LIKELY(count)) {
-        guint i, disconnected = 0;
+        GBinderServiceManagerClass* klass =
+            GBINDER_SERVICEMANAGER_GET_CLASS(self);
+        GBinderServiceManagerPriv* priv = self->priv;
+        GHashTableIter it;
+        gpointer value;
 
-        for (i = 0; i < count; i++) {
-            if (ids[i]) {
-                g_signal_handler_disconnect(self, ids[i]);
-                disconnected++;
-                ids[i] = 0;
-            }
-        }
+        gutil_disconnect_handlers(self, ids, count);
 
-        if (disconnected) {
-            GBinderServiceManagerClass* klass =
-                GBINDER_SERVICEMANAGER_GET_CLASS(self);
-            GBinderServiceManagerPriv* priv = self->priv;
-            GHashTableIter it;
-            gpointer value;
+        /*
+         * Regardless of whether we have actually removed any handlers, still
+         * check all watchers because there's a possibility that some handlers
+         * got removed with a straight g_signal_handler_disconnect() call.
+         */
+        g_hash_table_iter_init(&it, priv->watch_table);
+        while (g_hash_table_iter_next(&it, NULL, &value)) {
+            GBinderServiceManagerWatch* watch = value;
 
-            g_hash_table_iter_init(&it, priv->watch_table);
-            while (disconnected && g_hash_table_iter_next(&it, NULL, &value)) {
-                GBinderServiceManagerWatch* watch = value;
-
-                if (watch->watched && !g_signal_has_handler_pending(self,
-                    gbinder_servicemanager_signals[SIGNAL_REGISTRATION],
-                    watch->quark, TRUE)) {
-                    /* This must be one of those we have just removed */
-                    GDEBUG("Unwatching %s", watch->name);
+            if (!g_signal_has_handler_pending(self,
+                gbinder_servicemanager_signals[SIGNAL_REGISTRATION],
+                watch->quark, TRUE)) {
+                /* No need to keep the watch around if no one is listening */
+                GDEBUG("Dropping watch %s", watch->name);
+                if (watch->watched) {
                     watch->watched = FALSE;
                     klass->unwatch(self, watch->name);
-                    disconnected--;
                 }
+                g_hash_table_iter_remove(&it);
             }
         }
     }

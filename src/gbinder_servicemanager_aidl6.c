@@ -1,7 +1,7 @@
 /*
  * Copyright (C) 2021-2022 Jolla Ltd.
- *
- * You may use this file under the terms of BSD license as follows:
+ * Copyright (C) 2021-2022 Slava Monich <slava.monich@jolla.com>
+ * Copyright (C) 2026 Jolla Mobile Ltd
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -29,68 +29,53 @@
  * THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef BINDER_CALL_H__
-#define BINDER_CALL_H__
+#include "gbinder_servicemanager_aidl.h"
 
-#include <gbinder.h>
+/* Variant of AIDL servicemanager appeared in Android 16 (API level 36) */
 
-typedef struct app_options {
-    char* dev;
-    gboolean oneway;
-    gboolean aidl;
-    gint transaction;
-    int argc;
-    char** argv;
-} AppOptions;
+typedef GBinderServiceManagerAidl GBinderServiceManagerAidl6;
+typedef GBinderServiceManagerAidlClass GBinderServiceManagerAidl6Class;
 
-typedef struct app {
-    const AppOptions* opt;
-    GMainLoop* loop;
-    GBinderServiceManager* sm;
-    GBinderWriter writer;
-    GBinderReader reader;
-    int code;
-    int rargc;
-    int ret;
-} App;
+G_DEFINE_TYPE(GBinderServiceManagerAidl6,
+    gbinder_servicemanager_aidl6,
+    GBINDER_TYPE_SERVICEMANAGER_AIDL5)
 
-enum TYPE_INFO {
-    INT8_TYPE = 0,
-    INT32_TYPE,
-    INT64_TYPE,
-    FLOAT_TYPE,
-    DOUBLE_TYPE,
-    STRING8_TYPE,
-    STRING16_TYPE,
-    HSTRING_TYPE,
-    STRUCT_TYPE,
-    VECTOR_TYPE
+enum gbinder_servicemanager_aidl6_calls {
+    AIDL6_GET_SERVICE_TRANSACTION = GBINDER_FIRST_CALL_TRANSACTION,
+    AIDL6_GET_SERVICE2_TRANSACTION,
+    AIDL6_CHECK_SERVICE_TRANSACTION,
+    AIDL6_CHECK_SERVICE2_TRANSACTION,
+    AIDL6_ADD_SERVICE_TRANSACTION,
+    AIDL6_LIST_SERVICES_TRANSACTION,
+    AIDL6_REGISTER_FOR_NOTIFICATIONS_TRANSACTION,
+    AIDL6_UNREGISTER_FOR_NOTIFICATIONS_TRANSACTION
 };
 
-struct type_info {
-    enum TYPE_INFO type;
-    void* data;
-};
+static
+void
+gbinder_servicemanager_aidl6_init(
+    GBinderServiceManagerAidl6* self)
+{
+}
 
-struct value_info {
-    enum TYPE_INFO type;
-    void* value;
-};
+static
+void
+gbinder_servicemanager_aidl6_class_init(
+    GBinderServiceManagerAidl6Class* klass)
+{
+    klass->check_service_transaction = AIDL6_CHECK_SERVICE_TRANSACTION;
+    klass->add_service_transaction = AIDL6_ADD_SERVICE_TRANSACTION;
+    klass->list_services_transaction = AIDL6_LIST_SERVICES_TRANSACTION;
+    klass->register_for_notifications_transaction =
+        AIDL6_REGISTER_FOR_NOTIFICATIONS_TRANSACTION;
+    klass->unregister_for_notifications_transaction =
+        AIDL6_UNREGISTER_FOR_NOTIFICATIONS_TRANSACTION;
+}
 
-struct transaction_and_reply {
-    GList* tree_transaction;
-    GList* tree_reply;
-};
-
-int
-cmdline_parse(
-    App* app);
-
-int
-cmdlinelex(
-    void* args);
-
-extern struct transaction_and_reply* ast;
-
-#endif
-
+/*
+ * Local Variables:
+ * mode: C
+ * c-basic-offset: 4
+ * indent-tabs-mode: nil
+ * End:
+ */

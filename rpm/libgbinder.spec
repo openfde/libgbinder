@@ -1,6 +1,6 @@
 Name: libgbinder
 
-Version: 1.1.34
+Version: 1.1.51
 Release: 0
 Summary: Binder client library
 License: BSD
@@ -20,17 +20,34 @@ BuildRequires: flex
 BuildRequires: pkgconfig(rpm)
 %define license_support %(pkg-config --exists 'rpm >= 4.11'; echo $?)
 
+# make_build macro appeared in rpm 4.12
+%{!?make_build:%define make_build make %{_smp_mflags}}
+
+# openSUSE workaround
+%if 0%{?suse_version} > 0
+%define libname %{name}%{so_ver}
+%define so_ver %(echo %{version} | cut -d. -f1)
+%description
+C interfaces for Android binder
+
+%package -n %{libname}
+Summary: Runtime library for %{name}
+Provides: %{name} = %{version}
+%else
+%define libname %{name}
+%endif
+
 Requires: glib2 >= %{glib_version}
 Requires: libglibutil >= %{libglibutil_version}
 Requires(post): /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
 
-%description
+%description -n %{libname}
 C interfaces for Android binder
 
 %package devel
 Summary: Development library for %{name}
-Requires: %{name} = %{version}
+Requires: %{libname} = %{version}
 Requires: pkgconfig(glib-2.0) >= %{glib_version}
 
 %description devel
@@ -40,27 +57,21 @@ This package contains the development library for %{name}.
 %setup -q
 
 %build
-make %{_smp_mflags} LIBDIR=%{_libdir} KEEP_SYMBOLS=1 release pkgconfig
-make -C test/binder-bridge KEEP_SYMBOLS=1 release
-make -C test/binder-list KEEP_SYMBOLS=1 release
-make -C test/binder-ping KEEP_SYMBOLS=1 release
-make -C test/binder-call KEEP_SYMBOLS=1 release
+%make_build LIBDIR=%{_libdir} KEEP_SYMBOLS=1 release pkgconfig
+%make_build -C tools KEEP_SYMBOLS=1 release
 
 %install
 make LIBDIR=%{_libdir} DESTDIR=%{buildroot} install-dev
-make -C test/binder-bridge DESTDIR=%{buildroot} install
-make -C test/binder-list DESTDIR=%{buildroot} install
-make -C test/binder-ping DESTDIR=%{buildroot} install
-make -C test/binder-call DESTDIR=%{buildroot} install
+make -C tools DESTDIR=%{buildroot} install
 
 %check
 make -C unit test
 
-%post -p /sbin/ldconfig
+%post -n %{libname} -p /sbin/ldconfig
 
-%postun -p /sbin/ldconfig
+%postun -n %{libname} -p /sbin/ldconfig
 
-%files
+%files -n %{libname}
 %defattr(-,root,root,-)
 %{_libdir}/%{name}.so.*
 %if %{license_support} == 0
@@ -78,7 +89,9 @@ make -C unit test
 
 %package tools
 Summary: Binder tools
-Requires: %{name} >= %{version}
+%if 0%{?suse_version} == 0
+Requires: %{libname} >= %{version}
+%endif
 
 %description tools
 Binder command line utilities

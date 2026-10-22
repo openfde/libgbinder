@@ -1,3 +1,125 @@
+libgbinder (1.1.51) unstable; urgency=low
+
+  * Added support for AIDL registration notifications
+  * Droped (broken?) gbinder_servicemanager_aidl4
+  * Moved tools into a separate directory
+
+ -- Slava Monich <slava.monich@jolla.com>  Wed, 22 Jul 2026 04:07:29 +0300
+
+libgbinder (1.1.50) unstable; urgency=low
+
+  * Fixed proxy issues
+
+ -- Slava Monich <slava.monich@jolla.com>  Wed, 01 Jul 2026 17:51:34 +0300
+
+libgbinder (1.1.49) unstable; urgency=low
+
+  * Added gbinder_reader_skip_parcelable() API
+  * Skip objects consumed by gbinder_reader_read_parcelable()
+  * Prohibit further reads from finished parcelables
+
+ -- Slava Monich <slava.monich@jolla.com>  Mon, 29 Jun 2026 16:25:44 +0300
+
+libgbinder (1.1.48) unstable; urgency=low
+
+  * Added gbinder_reader_start/finish_parcelable() API
+  * Added gbinder_reader_read_parcelable2() API
+  * Prevent creation of corrupted coverage profiles
+  * Fixed race condition in /proxy_object/param test
+
+ -- Slava Monich <slava.monich@jolla.com>  Mon, 22 Jun 2026 01:12:50 +0300
+
+libgbinder (1.1.47) unstable; urgency=low
+
+  * Added gbinder_writer_start/finish_parcelable()
+
+ -- Slava Monich <slava@monich.com>  Thu, 28 May 2026 02:14:36 +0300
+
+libgbinder (1.1.46) unstable; urgency=low
+
+  * Fixed potential string length overflow
+  * Use release build for unit testing
+
+ -- Slava Monich <slava@monich.com>  Sun, 24 May 2026 19:13:49 +0300
+
+libgbinder (1.1.45) unstable; urgency=low
+
+  * Add support for Android 15 (API level 35)
+  * Add support for Android 16 (API level 36)
+  * Conform to openSUSE shared library packaging policy
+
+ -- Slava Monich <slava@monich.com>  Mon, 23 Mar 2026 04:54:02 +0200
+
+libgbinder (1.1.44) unstable; urgency=low
+
+  * Added gbinder_bridge_new3 (direct-name bridging)
+
+ -- Slava Monich <slava@monich.com>  Tue, 03 Mar 2026 03:49:47 +0200
+
+libgbinder (1.1.43) unstable; urgency=low
+
+  * Add support for writing AIDL FMQs
+  * Add missing implementation for gbinder_writer_append_fds
+  * Explicitly declare function parameters for C23 compatibility
+
+ -- Slava Monich <slava@monich.com>  Wed, 17 Sep 2025 04:02:48 +0300
+
+libgbinder (1.1.42) unstable; urgency=low
+
+  * Delete name watches with no handlers
+  * Register for sm notifications asynchronously
+  * Correct stability field wire format on Android 12
+
+ -- Slava Monich <slava@monich.com>  Wed, 11 Dec 2024 06:40:00 +0200
+
+libgbinder (1.1.41) unstable; urgency=low
+
+  * Fix sending NULL binder object
+  * Added gbinder_reader_read_nullable_string8
+  * Check if counted strings are NULL-terminated
+
+ -- Slava Monich <slava@monich.com>  Sat, 02 Nov 2024 05:13:22 +0200
+
+libgbinder (1.1.40) unstable; urgency=low
+
+  * Make stability field of local object configurable
+  * Make more unit tests independent on system config
+  * Use UNDECLARED stability for NULL binders
+
+ -- Slava Monich <slava@monich.com>  Thu, 18 Jul 2024 05:14:28 +0300
+
+libgbinder (1.1.39) unstable; urgency=low
+
+  * Eliminate defects found by Coverity
+
+ -- Slava Monich <slava@monich.com>  Sun, 05 May 2024 20:03:44 +0300
+
+libgbinder (1.1.38) unstable; urgency=low
+
+  * Fixed byte array padding
+
+ -- Slava Monich <slava@monich.com>  Sat, 02 Mar 2024 02:11:50 +0200
+
+libgbinder (1.1.37) unstable; urgency=low
+
+  * Fixed gbinder_driver_reply_data return value
+
+ -- Slava Monich <slava@monich.com>  Mon, 26 Feb 2024 16:22:29 +0200
+
+libgbinder (1.1.36) unstable; urgency=low
+
+  * Support pkg-config cross-compilation
+  * Fixed handling of UTF-16 surrogate pairs
+
+ -- Slava Monich <slava@monich.com>  Sat, 10 Feb 2024 05:04:13 +0200
+
+libgbinder (1.1.35) unstable; urgency=low
+
+  * Make unit tests independent on system config
+  * Use MAKE var instead of explicitly calling make
+
+ -- Slava Monich <slava@monich.com>  Thu, 23 Nov 2023 01:42:56 +0200
+
 libgbinder (1.1.34) unstable; urgency=low
 
   * Fixed binder-call help message
